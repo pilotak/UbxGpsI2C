@@ -32,17 +32,23 @@ SOFTWARE.
 #define DEFAULT_REPEAT_TIMEOUT 100  // ms
 #define TX_BUFFER_SIZE 16
 
+#define UBX_ACK 0x05
+#define UBX_ACK_ACK 0x01
+#define UBX_ACK_NAK 0x00
+
 class UbxGpsI2C {
  public:
   UbxGpsI2C(char * buf, uint16_t buf_size, int8_t address = DEFAULT_ADDRESS);
   bool init(I2C * i2c_obj, EventQueue * queue);
   void get(event_callback_t function, uint8_t repeat_timeout = DEFAULT_REPEAT_TIMEOUT);
-  bool sendUbx(uint8_t class_id, uint8_t id, const char * data, uint16_t len);
+  bool sendUbxAck(uint8_t class_id, uint8_t id, const char * data, uint16_t len);
+  bool sendUbx(uint8_t class_id, uint8_t id, const char * data, uint16_t len, uint16_t rx_len = 0);
 
  private:
   I2C * _i2c;
   EventQueue * _queue;
   event_callback_t _done_cb;
+  EventFlags _event;
 
   const uint16_t _buf_size;
   const int8_t _i2c_addr;
@@ -53,9 +59,10 @@ class UbxGpsI2C {
   char _tx_buf[TX_BUFFER_SIZE];
   uint16_t _rx_len;
   uint8_t _repeat_timeout;
+  bool _send_status;
 
   void internalCb(int event);
-  bool sender(uint8_t tx_size, uint16_t rx_size);
+  bool send(uint8_t tx_size, uint16_t rx_size);
   void getLen();
 };
 
