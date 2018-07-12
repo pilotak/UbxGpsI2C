@@ -30,7 +30,7 @@ SOFTWARE.
 
 #define DEFAULT_ADDRESS (0x42<<1)
 #define DEFAULT_REPEAT_TIMEOUT 100  // ms
-#define TX_BUFFER_SIZE 16
+#define TX_BUFFER_SIZE 48
 
 #define UBX_ACK 0x05
 #define UBX_ACK_ACK 0x01
@@ -45,6 +45,16 @@ class UbxGpsI2C {
   bool sendUbx(uint8_t class_id, uint8_t id, const char * data, uint16_t len, uint16_t rx_len = 0);
 
  private:
+  typedef enum {
+    start,
+    ready,
+    getLen,
+    getData,
+    sendOk,
+    getAck,
+    getUbx
+  } Stage_t;
+
   I2C * _i2c;
   EventQueue * _queue;
   event_callback_t _done_cb;
@@ -53,8 +63,9 @@ class UbxGpsI2C {
   const uint16_t _buf_size;
   const int8_t _i2c_addr;
 
+  int _queue_id;
   bool _initialized;
-  uint8_t _step;
+  Stage_t _step;
   char * _rx_buf;
   char _tx_buf[TX_BUFFER_SIZE];
   uint16_t _rx_len;
@@ -63,7 +74,7 @@ class UbxGpsI2C {
 
   void internalCb(int event);
   bool send(uint8_t tx_size, uint16_t rx_size);
-  void getLen();
+  void getLenCb();
 };
 
 #endif
