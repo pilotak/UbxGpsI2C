@@ -29,52 +29,71 @@ SOFTWARE.
 #include "mbed_events.h"
 
 #define DEFAULT_ADDRESS (0x42<<1)
-#define DEFAULT_REPEAT_TIMEOUT 100  // ms
+#define DEFAULT_TIMEOUT 2000  // ms
 #define TX_BUFFER_SIZE 48
 
-#define UBX_ACK 0x05
-#define UBX_ACK_ACK 0x01
-#define UBX_ACK_NAK 0x00
+#define SYNC_CHAR1 0xB5
+#define SYNC_CHAR2 0x62
+
+#define CFG_PRT 0x00
+#define ACK_ACK 0x01
 
 class UbxGpsI2C {
  public:
+  typedef enum {
+    UBX_NAV = 0x01,
+    UBX_RXM = 0x02,
+    UBX_INF = 0x04,
+    UBX_ACK = 0x05,
+    UBX_CFG = 0x06,
+    UBX_UPD = 0x09,
+    UBX_MON = 0x0A,
+    UBX_AID = 0x0B,
+    UBX_TIM = 0x0D,
+    UBX_ESF = 0x10,
+    UBX_MGA = 0x13,
+    UBX_LOG = 0x21,
+    UBX_SEC = 0x27,
+    UBX_HNR = 0x28
+  } UbxClassId;
+
   UbxGpsI2C(char * buf, uint16_t buf_size, int8_t address = DEFAULT_ADDRESS);
-  bool init(I2C * i2c_obj, EventQueue * queue);
-  void get(event_callback_t function, uint8_t repeat_timeout = DEFAULT_REPEAT_TIMEOUT);
-  bool sendUbxAck(uint8_t class_id, uint8_t id, const char * data, uint16_t len);
-  bool sendUbx(uint8_t class_id, uint8_t id, const char * data, uint16_t len, uint16_t rx_len = 0);
+  bool init(I2C * i2c_obj);
+  bool sendUbxAck(UbxClassId class_id, uint8_t id, const char * data, uint16_t tx_len);
+  bool sendUbx(UbxClassId class_id, uint8_t id, const char * data, uint16_t tx_len, uint16_t rx_len = 0, event_callback_t function = NULL,
+               bool include_header_checksum = true);
+
+ protected:
+  struct cfg_prt_t {
+    uint8_t port;
+    uint8_t reserved1;
+    uint16_t txReady;
+    uint32_t mode;
+    uint32_t baudRate;
+    uint16_t inProtoMask;
+    uint16_t outProtoMask;
+    uint16_t flags;
+    uint8_t reserved2[2];
+  };
+
+  bool send(uint8_t tx_size, uint16_t rx_size);
+  uint16_t checksum(const char * data, uint16_t len, uint16_t offset = 0);
 
  private:
-  typedef enum {
-    start,
-    ready,
-    getLen,
-    getData,
-    sendOk,
-    getAck,
-    getUbx
-  } Stage_t;
-
   I2C * _i2c;
-  EventQueue * _queue;
   event_callback_t _done_cb;
-  EventFlags _event;
+  Semaphore _semaphore;
 
   const uint16_t _buf_size;
   const int8_t _i2c_addr;
 
-  int _queue_id;
-  bool _initialized;
-  Stage_t _step;
   char * _rx_buf;
   char _tx_buf[TX_BUFFER_SIZE];
-  uint16_t _rx_len;
-  uint8_t _repeat_timeout;
-  bool _send_status;
+  uint16_t _req_len;
+  bool _got_ubx_data;
+  bool _include_header_checksum;
 
   void internalCb(int event);
-  bool send(uint8_t tx_size, uint16_t rx_size);
-  void getLenCb();
 };
 
 #endif

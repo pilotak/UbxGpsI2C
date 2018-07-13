@@ -28,133 +28,69 @@ SOFTWARE.
 UbxGpsI2C::UbxGpsI2C(char * buf, uint16_t buf_size, int8_t address):
     _buf_size(buf_size),
     _i2c_addr(address),
-    _queue_id(-1),
-    _initialized(false),
-    _step(start),
-    _rx_len(0),
-    _repeat_timeout(DEFAULT_REPEAT_TIMEOUT),
-    _send_status(false) {
+    _req_len(0),
+    _got_ubx_data(false),
+    _include_header_checksum(false) {
     _rx_buf = buf;
 }
 
-bool UbxGpsI2C::init(I2C * i2c_obj, EventQueue * queue) {
+bool UbxGpsI2C::init(I2C * i2c_obj) {
     _i2c = i2c_obj;
-    _queue = queue;
 
     if (_i2c && _rx_buf) {
-        _tx_buf[0] = 0xFF;
-        _initialized = true;
+        if (sendUbx(UBX_CFG, CFG_PRT, NULL, 0, 20)) {
+            _semaphore.wait(DEFAULT_TIMEOUT);
 
-        if (send(1, 0)) {
-            _send_status = false;
-            _event.wait_all(0x1);
-            _initialized = _send_status;
-            _step = ready;
-            return _initialized;
-        }
-    }
+            if (_got_ubx_data) {
+                cfg_prt_t cfg_prt;
+                memcpy(&cfg_prt, _rx_buf + 6, sizeof(cfg_prt_t));
+                cfg_prt.outProtoMask &= ~0b110;  // output only UBX
 
-    _initialized = false;
-    return false;
-}
+                char tx[sizeof(cfg_prt_t)];
+                memcpy(tx, &cfg_prt, sizeof(cfg_prt_t));
 
-void UbxGpsI2C::get(event_callback_t function, uint8_t repeat_timeout) {
-    _repeat_timeout = repeat_timeout;
-    _done_cb = function;
-
-    if (_queue && _queue_id > -1) {
-        _queue->cancel(_queue_id);
-        _queue_id = -1;
-    }
-
-    getLenCb();
-}
-
-bool UbxGpsI2C::send(uint8_t tx_size, uint16_t rx_size) {
-    if (_initialized) {
-        /*debug("expecting: %u sending: ", rx_size);
-
-        for (uint8_t i = 0; i < tx_size; i++) {
-            debug("%02X ", _tx_buf[i]);
-        }
-
-        debug("\n");*/
-
-        if (_i2c->transfer(
-                    _i2c_addr,
-                    reinterpret_cast<char*>(_tx_buf),
-                    tx_size,
-                    _rx_buf,
-                    rx_size,
-                    event_callback_t(this, &UbxGpsI2C::internalCb),
-                    I2C_EVENT_ALL) == 0) {
-            return true;
+                if (sendUbxAck(UBX_CFG, CFG_PRT, tx, sizeof(cfg_prt_t))) {
+                    return true;
+                }
+            }
         }
     }
 
     return false;
 }
 
-void UbxGpsI2C::getLenCb() {
-    _step = getLen;
-    _tx_buf[0] = 0xFD;
-    send(1, 2);
+bool UbxGpsI2C::send(uint8_t tx_len, uint16_t rx_len) {
+    if (_i2c->transfer(
+                _i2c_addr,
+                reinterpret_cast<char*>(_tx_buf),
+                tx_len,
+                _rx_buf,
+                rx_len,
+                event_callback_t(this, &UbxGpsI2C::internalCb),
+                I2C_EVENT_ALL) == 0) {
+        return true;
+    }
+
+    return false;
 }
 
 void UbxGpsI2C::internalCb(int event) {
     if (event & I2C_EVENT_ERROR_NO_SLAVE) {
-        _send_status = false;
+        if (_done_cb) {
+            _done_cb.call(-1);
+        }
 
     } else if (event & I2C_EVENT_ERROR) {
-        _send_status = false;
+        if (_done_cb) {
+            _done_cb.call(-2);
+        }
 
     } else {
-        _send_status = true;
-
-        if (_step == start) {  // start
-            _event.set(0x1);
-
-        } else if (_step == getLen) {  // len
-            _rx_len = (_rx_buf[0] << 8) | _rx_buf[1];
-
-            if (_rx_len == 0) {
-                if (_queue) {
-                    _step = getLen;
-                    _queue_id = _queue->call_in(_repeat_timeout, callback(this, &UbxGpsI2C::getLenCb));
-
-                } else {
-                    _step = ready;
-                }
-
-            } else {
-                if (_rx_len > _buf_size) {  // prevent buffer overflow
-                    _rx_len = _buf_size;
-                }
-
-                _queue_id = -1;
-
-                _tx_buf[0] = 0xFF;
-
-                if (send(1, _rx_len)) {
-                    _step = getData;
-
-                } else {
-                    _step = ready;
-                }
-            }
-
-        } else if (_step == getData) {
-            _step = ready;
-
-            if (_done_cb) {
-                _done_cb.call(_rx_len);
-            }
-
-        } else if (_step == getUbx) {
+        if (_req_len > 0) {
             int16_t index = -1;
 
             for (uint16_t i = 0; i < _buf_size; i++) {
-                if (_rx_buf[i] == 0xB5 && _rx_buf[i + 1] == 0x62) {  // find start
+                if (_rx_buf[i] == SYNC_CHAR1 && _rx_buf[i + 1] == SYNC_CHAR2) {  // find index of SYNC_CHAR1
                     index = i;
                     break;
                 }
@@ -163,91 +99,99 @@ void UbxGpsI2C::internalCb(int event) {
             if (index > -1) {
                 uint16_t size = ((_rx_buf[index + 5] << 8) | _rx_buf[index + 4]);
 
-                if (size > 0) {
-                    // debug("data[%u]: ", size);
+                if (_req_len <= size) {
+                    uint16_t ck = checksum(_rx_buf, size + 6, index);  // exclude header and checksum
 
-                    for (uint16_t i = 0; i < size + 8; ++i) {
-                        _rx_buf[i] = _rx_buf[i + index];  // correct index
-                        // debug("%02X ", _rx_buf[i]);
+                    if (_rx_buf[index + size + 6] == (ck & 0xFF) && _rx_buf[index + size + 7] == (ck >> 8)) {
+                        uint16_t offset = (_include_header_checksum ? 0 : 6);
+
+                        for (uint16_t i = 0; i < size + (_include_header_checksum ? 8 : 0) ; ++i) {  // data len + header + checksum
+                            _rx_buf[i] = _rx_buf[i + index + offset];  // correct index
+                        }
+
+                        _got_ubx_data = true;
+                        wait_ms(5);
+
+                        _semaphore.release();
+
+                        if (_done_cb) {
+                            _done_cb.call(size + (_include_header_checksum ? 6 : 0));  // data len + header + checksum
+                        }
                     }
-
-                    // debug("\n");
                 }
+            }
+
+        } else if (_done_cb) {
+            _done_cb.call(0);
+        }
+    }
+}
+
+bool UbxGpsI2C::sendUbxAck(UbxClassId class_id, uint8_t id, const char * data, uint16_t tx_len) {
+    if (sendUbx(class_id, id, data, tx_len, 2)) {
+        _semaphore.wait_until(DEFAULT_TIMEOUT);
+
+        if (_got_ubx_data) {
+            if (_rx_buf[2] == UBX_ACK && _rx_buf[3] == ACK_ACK && _rx_buf[6] == class_id && _rx_buf[7] == id) {
+                return true;
             }
         }
     }
 
-    if (_step == sendOk) {
-        _event.set(0x03);
-
-    } else if (_step == getUbx) {
-        _event.set(0x02);
-    }
-}
-
-bool UbxGpsI2C::sendUbxAck(uint8_t class_id, uint8_t id, const char * data, uint16_t len) {
-    if (sendUbx(class_id, id, data, len, len + 8)) {
-        bool _ack = false;
-
-        if (_rx_buf[2] == UBX_ACK && _rx_buf[3] == UBX_ACK_ACK) {
-            _ack = true;
-        }
-
-        // debug("ack: %u\n", _ack);
-
-        return _ack;
-    }
-
     return false;
 }
 
-bool UbxGpsI2C::sendUbx(uint8_t class_id, uint8_t id, const char * data, uint16_t len, uint16_t rx_len) {
-    uint32_t ca = 0;
-    uint32_t cb = 0;
+bool UbxGpsI2C::sendUbx(UbxClassId class_id, uint8_t id, const char * data, uint16_t tx_len, uint16_t rx_len, event_callback_t function,
+                        bool include_header_checksum) {
+    _done_cb = function;
+    _req_len = rx_len;
+    _include_header_checksum = include_header_checksum;
 
-    if (len > (TX_BUFFER_SIZE - 8)) {  // prevent buffer overflow
+    if (tx_len > (TX_BUFFER_SIZE - 8)) {  // prevent buffer overflow
         return false;
     }
 
-    _tx_buf[0] = 0xB5;  // sync char 1
-    _tx_buf[1] = 0x62;  // sync char 2
+    _tx_buf[0] = SYNC_CHAR1;
+    _tx_buf[1] = SYNC_CHAR2;
     _tx_buf[2] = class_id;
     _tx_buf[3] = id;
-    _tx_buf[4] = static_cast<char>(len);
-    _tx_buf[5] = static_cast<char>(len >> 8);
+    _tx_buf[4] = static_cast<char>(tx_len);
+    _tx_buf[5] = static_cast<char>(tx_len >> 8);
 
-    memcpy(_tx_buf + 6, data, len);
-
-    for (uint16_t i = 2; i < (6 + len); i++) {
-        ca += _tx_buf[i];
-        cb += ca;
+    if (tx_len > 0) {
+        memcpy(_tx_buf + 6, data, tx_len);
     }
 
-    _tx_buf[(6 + len)] = (ca & 0xFF);
-    _tx_buf[(7 + len)] = (cb & 0xFF);
+    uint16_t ck = checksum(_tx_buf, (6 + tx_len));
 
-    int wait_code = 0x02;
+    _tx_buf[(6 + tx_len)] = (ck & 0xFF);
+    _tx_buf[(7 + tx_len)] = (ck >> 8);
 
-    if (_step == ready) {
-        _step = sendOk;
-        wait_code = 0x03;
-
-        if (rx_len > 0) {
-            _step = getUbx;
-            wait_code = 0x02;
-        }
+    if (rx_len > 0) {
+        rx_len += (8 + 10);  // header, checksum + extra space
+        _got_ubx_data = false;
     }
 
-    if (send((8 + len), rx_len + 20)) {
-        _event.wait_all(wait_code);
-
-        if (_send_status) {
-            return true;
-        }
+    if (send((8 + tx_len), rx_len)) {
+        return true;
     }
-
-    _step = ready;
 
     return false;
 }
 
+uint16_t UbxGpsI2C::checksum(const char * data, uint16_t len, uint16_t offset) {
+    uint32_t ca = 0;
+    uint32_t cb = 0;
+    uint16_t res = 0;
+
+    if (data && len >= 6) {  // min msg length is 8 bytes including checksum
+        for (uint16_t i = (2 + offset); i < (len + offset); i++) {  // calculate checksum, exclude sync chars
+            ca += data[i];
+            cb += ca;
+        }
+
+        res =  ((cb & 0xFF) << 8) | (ca & 0xFF);
+    }
+
+    return res;
+}
