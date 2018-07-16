@@ -129,7 +129,7 @@ void UbxGpsI2C::internalCb(int event) {
 
 bool UbxGpsI2C::sendUbxAck(UbxClassId class_id, uint8_t id, const char * data, uint16_t tx_len) {
     if (sendUbx(class_id, id, data, tx_len, 2)) {
-        _semaphore.wait_until(DEFAULT_TIMEOUT);
+        _semaphore.wait(DEFAULT_TIMEOUT);
 
         if (_got_ubx_data) {
             if (_rx_buf[2] == UBX_ACK && _rx_buf[3] == ACK_ACK && _rx_buf[6] == class_id && _rx_buf[7] == id) {
