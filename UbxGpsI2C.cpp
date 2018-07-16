@@ -34,8 +34,21 @@ UbxGpsI2C::UbxGpsI2C(char * buf, uint16_t buf_size, int8_t address):
     _rx_buf = buf;
 }
 
+UbxGpsI2C::UbxGpsI2C(PinName sda, PinName scl, char * buf, uint16_t buf_size, int8_t address, uint32_t frequency):
+    _buf_size(buf_size),
+    _i2c_addr(address),
+    _req_len(0),
+    _got_ubx_data(false),
+    _include_header_checksum(false) {
+    _i2c = new I2C(sda, scl);
+    _i2c->frequency(frequency);
+    _rx_buf = buf;
+}
+
 bool UbxGpsI2C::init(I2C * i2c_obj) {
-    _i2c = i2c_obj;
+    if (i2c_obj) {
+        _i2c = i2c_obj;
+    }
 
     if (_i2c && _rx_buf) {
         if (sendUbx(UBX_CFG, CFG_PRT, NULL, 0, 20)) {

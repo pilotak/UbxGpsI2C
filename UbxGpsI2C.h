@@ -26,7 +26,6 @@ SOFTWARE.
 #define DEBOUNCEIN_H
 
 #include "mbed.h"
-#include "mbed_events.h"
 
 #define DEFAULT_ADDRESS (0x42<<1)
 #define DEFAULT_TIMEOUT 2000  // ms
@@ -58,7 +57,8 @@ class UbxGpsI2C {
   } UbxClassId;
 
   UbxGpsI2C(char * buf, uint16_t buf_size, int8_t address = DEFAULT_ADDRESS);
-  bool init(I2C * i2c_obj);
+  UbxGpsI2C(PinName sda, PinName scl, char * buf, uint16_t buf_size, int8_t address = DEFAULT_ADDRESS, uint32_t frequency = 400000);
+  bool init(I2C * i2c_obj = NULL);
   bool sendUbxAck(UbxClassId class_id, uint8_t id, const char * data, uint16_t tx_len);
   bool sendUbx(UbxClassId class_id, uint8_t id, const char * data, uint16_t tx_len, uint16_t rx_len = 0, event_callback_t function = NULL,
                bool include_header_checksum = true);
