@@ -27,9 +27,9 @@ SOFTWARE.
 
 #include "mbed.h"
 
-#define DEFAULT_ADDRESS (0x42<<1)
-#define DEFAULT_TIMEOUT 2000  // ms
-#define TX_BUFFER_SIZE 48
+#define UBX_DEFAULT_ADDRESS (0x42<<1)
+#define UBX_DEFAULT_TIMEOUT 2000  // ms
+#define UBX_TX_BUFFER_SIZE 48
 
 #define SYNC_CHAR1 0xB5
 #define SYNC_CHAR2 0x62
@@ -56,8 +56,9 @@ class UbxGpsI2C {
     UBX_HNR = 0x28
   } UbxClassId;
 
-  UbxGpsI2C(char * buf, uint16_t buf_size, int8_t address = DEFAULT_ADDRESS);
-  UbxGpsI2C(PinName sda, PinName scl, char * buf, uint16_t buf_size, int8_t address = DEFAULT_ADDRESS, uint32_t frequency = 400000);
+  UbxGpsI2C(char * buf, uint16_t buf_size, int8_t address = UBX_DEFAULT_ADDRESS);
+  UbxGpsI2C(PinName sda, PinName scl, char * buf, uint16_t buf_size, int8_t address = UBX_DEFAULT_ADDRESS, uint32_t frequency = 400000);
+  virtual ~UbxGpsI2C(void);
   bool init(I2C * i2c_obj = NULL);
   bool sendUbxAck(UbxClassId class_id, uint8_t id, const char * data, uint16_t tx_len);
   bool sendUbx(UbxClassId class_id, uint8_t id, const char * data, uint16_t tx_len, uint16_t rx_len = 0, event_callback_t function = NULL,
@@ -88,10 +89,11 @@ class UbxGpsI2C {
   const int8_t _i2c_addr;
 
   char * _rx_buf;
-  char _tx_buf[TX_BUFFER_SIZE];
+  char _tx_buf[UBX_TX_BUFFER_SIZE];
   uint16_t _req_len;
   bool _got_ubx_data;
   bool _include_header_checksum;
+  uint32_t _i2c_buffer[sizeof(I2C) / sizeof(uint32_t)];
 
   void internalCb(int event);
 };

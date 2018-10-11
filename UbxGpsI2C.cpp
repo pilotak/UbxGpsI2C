@@ -40,9 +40,15 @@ UbxGpsI2C::UbxGpsI2C(PinName sda, PinName scl, char * buf, uint16_t buf_size, in
     _req_len(0),
     _got_ubx_data(false),
     _include_header_checksum(false) {
-    _i2c = new I2C(sda, scl);
+    _i2c = new (_i2c_buffer) I2C(sda, scl);
     _i2c->frequency(frequency);
     _rx_buf = buf;
+}
+
+UbxGpsI2C::~UbxGpsI2C(void) {
+    if (_i2c == reinterpret_cast<I2C*>(_i2c_buffer)) {
+        _i2c->~I2C();
+    }
 }
 
 bool UbxGpsI2C::init(I2C * i2c_obj) {
@@ -52,7 +58,7 @@ bool UbxGpsI2C::init(I2C * i2c_obj) {
 
     if (_i2c && _rx_buf) {
         if (sendUbx(UBX_CFG, CFG_PRT, NULL, 0, 20)) {
-            _semaphore.wait(DEFAULT_TIMEOUT);
+            _semaphore.wait(UBX_DEFAULT_TIMEOUT);
 
             if (_got_ubx_data) {
                 cfg_prt_t cfg_prt;
@@ -142,7 +148,7 @@ void UbxGpsI2C::internalCb(int event) {
 
 bool UbxGpsI2C::sendUbxAck(UbxClassId class_id, uint8_t id, const char * data, uint16_t tx_len) {
     if (sendUbx(class_id, id, data, tx_len, 2)) {
-        _semaphore.wait(DEFAULT_TIMEOUT);
+        _semaphore.wait(UBX_DEFAULT_TIMEOUT);
 
         if (_got_ubx_data) {
             if (_rx_buf[2] == UBX_ACK && _rx_buf[3] == ACK_ACK && _rx_buf[6] == class_id && _rx_buf[7] == id) {
@@ -160,7 +166,7 @@ bool UbxGpsI2C::sendUbx(UbxClassId class_id, uint8_t id, const char * data, uint
     _req_len = rx_len;
     _include_header_checksum = include_header_checksum;
 
-    if (tx_len > (TX_BUFFER_SIZE - 8)) {  // prevent buffer overflow
+    if (tx_len > (UBX_TX_BUFFER_SIZE - 8)) {  // prevent buffer overflow
         return false;
     }
 
