@@ -83,7 +83,7 @@ class UbxGpsI2C {
  private:
   I2C * _i2c;
   event_callback_t _done_cb;
-  Semaphore _semaphore;
+  EventFlags _event;
 
   const uint16_t _buf_size;
   const int8_t _i2c_addr;
@@ -91,7 +91,6 @@ class UbxGpsI2C {
   char * _rx_buf;
   char _tx_buf[UBX_TX_BUFFER_SIZE];
   uint16_t _req_len;
-  bool _got_ubx_data;
   bool _include_header_checksum;
   uint32_t _i2c_buffer[sizeof(I2C) / sizeof(uint32_t)];
 
