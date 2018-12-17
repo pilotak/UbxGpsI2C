@@ -25,22 +25,19 @@ SOFTWARE.
 #include "mbed.h"
 #include "UbxGpsI2C.h"
 
-UbxGpsI2C::UbxGpsI2C(char * buf, uint16_t buf_size, int8_t address):
-    _buf_size(buf_size),
-    _i2c_addr(address),
-    _req_len(0),
-    _include_header_checksum(false) {
-    _rx_buf = buf;
+UbxGpsI2C::UbxGpsI2C(I2C * i2c_obj, char * buffer, const uint16_t buf_size, int8_t address):
+    _address(address),
+    _buf_size(buf_size) {
+    _i2c = i2c_obj;
+    _buf = buffer;
 }
 
-UbxGpsI2C::UbxGpsI2C(PinName sda, PinName scl, char * buf, uint16_t buf_size, int8_t address, uint32_t frequency):
-    _buf_size(buf_size),
-    _i2c_addr(address),
-    _req_len(0),
-    _include_header_checksum(false) {
+UbxGpsI2C::UbxGpsI2C(PinName sda, PinName scl, char * buffer, const uint16_t buf_size, int8_t address, uint32_t frequency):
+    _address(address),
+    _buf_size(buf_size) {
     _i2c = new (_i2c_buffer) I2C(sda, scl);
     _i2c->frequency(frequency);
-    _rx_buf = buf;
+    _buf = buffer;
 }
 
 UbxGpsI2C::~UbxGpsI2C(void) {
@@ -49,113 +46,19 @@ UbxGpsI2C::~UbxGpsI2C(void) {
     }
 }
 
-bool UbxGpsI2C::init(I2C * i2c_obj) {
-    if (i2c_obj) {
-        _i2c = i2c_obj;
-    }
+bool UbxGpsI2C::init() {
+    char tx_buf[sizeof(cfg_prt_t)];
 
-    if (_i2c && _rx_buf) {
-        if (sendUbx(UBX_CFG, CFG_PRT, NULL, 0, 20)) {
-            uint32_t flag = _event.wait_any(0b11, UBX_DEFAULT_TIMEOUT);
+    if (_buf) {
+        if (sendUbx(UBX_CFG, CFG_PRT, _buf_size - UBX_MIN_BUFFER_LEN) == sizeof(cfg_prt_t)) {  // get cfg
+            cfg_prt_t cfg_prt;
+            memcpy(&cfg_prt, _buf, sizeof(cfg_prt_t));
 
-            if (flag == 0b01) {
-                cfg_prt_t cfg_prt;
-                memcpy(&cfg_prt, _rx_buf + 6, sizeof(cfg_prt_t));
-                cfg_prt.outProtoMask &= ~0b110;  // output only UBX
+            cfg_prt.outProtoMask = 1;  // output only UBX
 
-                char tx[sizeof(cfg_prt_t)];
-                memcpy(tx, &cfg_prt, sizeof(cfg_prt_t));
+            memcpy(tx_buf, &cfg_prt, sizeof(cfg_prt_t));
 
-                if (sendUbxAck(UBX_CFG, CFG_PRT, tx, sizeof(cfg_prt_t))) {
-                    return true;
-                }
-            }
-        }
-    }
-
-    return false;
-}
-
-bool UbxGpsI2C::send(uint8_t tx_len, uint16_t rx_len) {
-    if (_i2c->transfer(
-                _i2c_addr,
-                reinterpret_cast<char*>(_tx_buf),
-                tx_len,
-                _rx_buf,
-                rx_len,
-                event_callback_t(this, &UbxGpsI2C::internalCb),
-                I2C_EVENT_ALL) == 0) {
-        return true;
-    }
-
-    _event.set(0b10);
-
-    return false;
-}
-
-void UbxGpsI2C::internalCb(int event) {
-    bool data_ok = false;
-
-    if (event & I2C_EVENT_ERROR_NO_SLAVE) {
-        if (_done_cb) {
-            _done_cb.call(-1);
-        }
-
-    } else if (event & I2C_EVENT_ERROR) {
-        if (_done_cb) {
-            _done_cb.call(-2);
-        }
-
-    } else {
-        if (_req_len > 0) {
-            int16_t index = -1;
-
-            for (uint16_t i = 0; i < _buf_size; i++) {
-                if (_rx_buf[i] == SYNC_CHAR1 && _rx_buf[i + 1] == SYNC_CHAR2) {  // find index of SYNC_CHAR1
-                    index = i;
-                    break;
-                }
-            }
-
-            if (index > -1) {
-                uint16_t size = ((_rx_buf[index + 5] << 8) | _rx_buf[index + 4]);
-
-                if (_req_len <= size) {
-                    uint16_t ck = checksum(_rx_buf, size + 6, index);  // exclude header and checksum
-
-                    if (_rx_buf[index + size + 6] == (ck & 0xFF) && _rx_buf[index + size + 7] == (ck >> 8)) {
-                        uint16_t offset = (_include_header_checksum ? 0 : 6);
-
-                        for (uint16_t i = 0; i < size + (_include_header_checksum ? 8 : 0) ; ++i) {  // data len + header + checksum
-                            _rx_buf[i] = _rx_buf[i + index + offset];  // correct index
-                        }
-
-                        data_ok = true;
-                        _event.set(0b01);
-
-                        if (_done_cb) {
-                            _done_cb.call(size + (_include_header_checksum ? 6 : 0));  // data len + header + checksum
-                        }
-                    }
-                }
-            }
-
-        } else if (_done_cb) {
-            _done_cb.call(0);
-        }
-    }
-
-    if (!data_ok) {
-        _event.set(0b10);
-    }
-}
-
-bool UbxGpsI2C::sendUbxAck(UbxClassId class_id, uint8_t id, const char * data, uint16_t tx_len) {
-    if (sendUbx(class_id, id, data, tx_len, 2)) {
-        uint32_t flag = _event.wait_any(0b11, UBX_DEFAULT_TIMEOUT);
-
-        if (flag == 0b01) {
-            if (_rx_buf[2] == UBX_ACK && _rx_buf[3] == ACK_ACK && _rx_buf[6] == class_id && _rx_buf[7] == id) {
+            if (sendUbxAck(UBX_CFG, CFG_PRT, tx_buf, sizeof(cfg_prt_t))) {
                 return true;
             }
         }
@@ -164,41 +67,90 @@ bool UbxGpsI2C::sendUbxAck(UbxClassId class_id, uint8_t id, const char * data, u
     return false;
 }
 
-bool UbxGpsI2C::sendUbx(UbxClassId class_id, uint8_t id, const char * data, uint16_t tx_len, uint16_t rx_len, event_callback_t function,
-                        bool include_header_checksum) {
-    _done_cb = function;
-    _req_len = rx_len;
-    _include_header_checksum = include_header_checksum;
-
-    if (tx_len > (UBX_TX_BUFFER_SIZE - 8)) {  // prevent buffer overflow
-        return false;
-    }
-
-    _tx_buf[0] = SYNC_CHAR1;
-    _tx_buf[1] = SYNC_CHAR2;
-    _tx_buf[2] = class_id;
-    _tx_buf[3] = id;
-    _tx_buf[4] = static_cast<char>(tx_len);
-    _tx_buf[5] = static_cast<char>(tx_len >> 8);
-
-    if (tx_len > 0) {
-        memcpy(_tx_buf + 6, data, tx_len);
-    }
-
-    uint16_t ck = checksum(_tx_buf, (6 + tx_len));
-
-    _tx_buf[(6 + tx_len)] = (ck & 0xFF);
-    _tx_buf[(7 + tx_len)] = (ck >> 8);
-
-    if (rx_len > 0) {
-        rx_len += (8 + 10);  // header, checksum + extra space
-    }
-
-    if (send((8 + tx_len), rx_len)) {
-        return true;
+bool UbxGpsI2C::sendUbxAck(UbxClassId class_id, uint8_t id, const char * tx_data, uint16_t tx_len) {
+    if (sendUbx(class_id, id, 0, tx_data, tx_len, true) > -1) {
+        if (_buf[2] == UBX_ACK && _buf[3] == ACK_ACK && _buf[6] == class_id && _buf[7] == id) {
+            return true;
+        }
     }
 
     return false;
+}
+
+int16_t UbxGpsI2C::sendUbx(UbxClassId class_id, uint8_t id, uint16_t req_len,
+                           const char * tx_data, uint16_t tx_len, bool include_header_checksum) {
+    int32_t ack;
+    uint16_t rx_len = req_len;
+    int16_t ret = -1;
+
+    if (max(req_len, tx_len) > _buf_size - UBX_MIN_BUFFER_LEN) {  // prevent buffer overflow
+        return ret;
+    }
+
+    memset(_buf, 0, _buf_size);
+
+    _buf[0] = SYNC_CHAR1;
+    _buf[1] = SYNC_CHAR2;
+    _buf[2] = class_id;
+    _buf[3] = id;
+    _buf[4] = static_cast<char>(tx_len);
+    _buf[5] = static_cast<char>(tx_len >> 8);
+
+    if (tx_len > 0) {
+        memcpy(_buf + 6, tx_data, tx_len);
+    }
+
+    uint16_t ck = checksum(_buf, (6 + tx_len));
+
+    _buf[(6 + tx_len)] = (ck & 0xFF);
+    _buf[(7 + tx_len)] = (ck >> 8);
+
+    tx_len += UBX_MIN_BUFFER_LEN;  // include header + checksum
+
+    if (req_len > 0 || include_header_checksum) {
+        rx_len += (UBX_MIN_BUFFER_LEN);  // header, checksum
+    }
+
+    if ((rx_len + 10) < _buf_size) {  // extra space
+        rx_len += 10;
+    }
+
+    _i2c->lock();
+    ack = _i2c->write(_address, _buf, tx_len);
+    _i2c->unlock();
+
+    if (ack == 0) {
+        _i2c->lock();
+        ack = _i2c->read(_address, _buf, rx_len);
+        _i2c->unlock();
+
+        if (ack == 0) {
+            int16_t index = -1;
+
+            for (uint16_t i = 0; i < rx_len; i++) {
+                if (_buf[i] == SYNC_CHAR1 && _buf[i + 1] == SYNC_CHAR2) {  // find index of SYNC_CHAR1
+                    index = i;
+                    break;
+                }
+            }
+
+            if (index > -1) {
+                uint16_t size = ((_buf[index + 5] << 8) | _buf[index + 4]);
+                uint16_t ck = checksum(_buf, size + 6, index);  // exclude header and checksum
+
+                if (_buf[index + size + 6] == (ck & 0xFF) && _buf[index + size + 7] == (ck >> 8)) {
+                    size = min(size, req_len);
+                    ret = (include_header_checksum ? size + UBX_MIN_BUFFER_LEN : size);
+
+                    for (uint16_t i = 0; i < ret; i++) {
+                        _buf[i] = _buf[i + index + (include_header_checksum ? 0 : (UBX_MIN_BUFFER_LEN - 2))];  // correct index
+                    }
+                }
+            }
+        }
+    }
+
+    return ret;
 }
 
 uint16_t UbxGpsI2C::checksum(const char * data, uint16_t len, uint16_t offset) {

@@ -25,17 +25,20 @@ SOFTWARE.
 #ifndef UBXGPSI2C_H
 #define UBXGPSI2C_H
 
+#include <algorithm>
 #include "mbed.h"
 
 #define UBX_DEFAULT_ADDRESS (0x42<<1)
 #define UBX_DEFAULT_TIMEOUT 2000  // ms
 #define UBX_TX_BUFFER_SIZE 48
+#define UBX_MIN_BUFFER_LEN 8
 
 #define SYNC_CHAR1 0xB5
 #define SYNC_CHAR2 0x62
 
 #define CFG_PRT 0x00
 #define ACK_ACK 0x01
+#define CFG_CFG 0x09
 
 class UbxGpsI2C {
  public:
@@ -56,13 +59,14 @@ class UbxGpsI2C {
     UBX_HNR = 0x28
   } UbxClassId;
 
-  UbxGpsI2C(char * buf, uint16_t buf_size, int8_t address = UBX_DEFAULT_ADDRESS);
-  UbxGpsI2C(PinName sda, PinName scl, char * buf, uint16_t buf_size, int8_t address = UBX_DEFAULT_ADDRESS, uint32_t frequency = 400000);
+  UbxGpsI2C(I2C * i2c_obj, char * buffer, const uint16_t buf_size, int8_t address = UBX_DEFAULT_ADDRESS);
+  UbxGpsI2C(PinName sda, PinName scl, char * buffer, const uint16_t buf_size, int8_t address = UBX_DEFAULT_ADDRESS,
+            uint32_t frequency = 400000);
   virtual ~UbxGpsI2C(void);
-  bool init(I2C * i2c_obj = NULL);
-  bool sendUbxAck(UbxClassId class_id, uint8_t id, const char * data, uint16_t tx_len);
-  bool sendUbx(UbxClassId class_id, uint8_t id, const char * data, uint16_t tx_len, uint16_t rx_len = 0, event_callback_t function = NULL,
-               bool include_header_checksum = true);
+  bool init();
+  bool sendUbxAck(UbxClassId class_id, uint8_t id, const char * tx_data, uint16_t tx_len);
+  int16_t sendUbx(UbxClassId class_id, uint8_t id, uint16_t req_len,
+                  const char * tx_data = NULL, uint16_t tx_len = 0, bool include_header_checksum = false);
 
  protected:
   struct cfg_prt_t {
@@ -77,24 +81,16 @@ class UbxGpsI2C {
     uint8_t reserved2[2];
   };
 
-  bool send(uint8_t tx_size, uint16_t rx_size);
+  I2C * _i2c;
+
   uint16_t checksum(const char * data, uint16_t len, uint16_t offset = 0);
 
  private:
-  I2C * _i2c;
-  event_callback_t _done_cb;
-  EventFlags _event;
-
+  const int8_t _address;
   const uint16_t _buf_size;
-  const int8_t _i2c_addr;
 
-  char * _rx_buf;
-  char _tx_buf[UBX_TX_BUFFER_SIZE];
-  uint16_t _req_len;
-  bool _include_header_checksum;
+  char * _buf;
   uint32_t _i2c_buffer[sizeof(I2C) / sizeof(uint32_t)];
-
-  void internalCb(int event);
 };
 
 #endif
