@@ -63,7 +63,7 @@ class UbxGpsI2C {
   UbxGpsI2C(PinName sda, PinName scl, char * buffer, const uint16_t buf_size, int8_t address = UBX_DEFAULT_ADDRESS,
             uint32_t frequency = 400000);
   virtual ~UbxGpsI2C(void);
-  bool init();
+  bool init(I2C * i2c_obj = NULL);
   bool sendUbxAck(UbxClassId class_id, uint8_t id, const char * tx_data, uint16_t tx_len);
   int16_t sendUbx(UbxClassId class_id, uint8_t id, uint16_t req_len,
                   const char * tx_data = NULL, uint16_t tx_len = 0, bool include_header_checksum = false);

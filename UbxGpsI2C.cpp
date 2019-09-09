@@ -35,9 +35,13 @@ UbxGpsI2C::UbxGpsI2C(I2C * i2c_obj, char * buffer, const uint16_t buf_size, int8
 UbxGpsI2C::UbxGpsI2C(PinName sda, PinName scl, char * buffer, const uint16_t buf_size, int8_t address, uint32_t frequency):
     _address(address),
     _buf_size(buf_size) {
-    ThisThread::sleep_for(50);
+    ThisThread::sleep_for(100);
     _i2c = new (_i2c_buffer) I2C(sda, scl);
-    _i2c->frequency(frequency);
+
+    if (_i2c) {
+        _i2c->frequency(frequency);
+    }
+
     _buf = buffer;
 }
 
@@ -47,7 +51,11 @@ UbxGpsI2C::~UbxGpsI2C(void) {
     }
 }
 
-bool UbxGpsI2C::init() {
+bool UbxGpsI2C::init(I2C * i2c_obj) {
+    if (i2c_obj != NULL) {
+        _i2c = i2c_obj;
+    }
+
     char tx_buf[sizeof(cfg_prt_t)];
 
     if (_buf) {
@@ -55,6 +63,7 @@ bool UbxGpsI2C::init() {
             cfg_prt_t cfg_prt;
             memcpy(&cfg_prt, _buf, sizeof(cfg_prt_t));
 
+            cfg_prt.inProtoMask  = 1;  // input only UBX
             cfg_prt.outProtoMask = 1;  // output only UBX
 
             memcpy(tx_buf, &cfg_prt, sizeof(cfg_prt_t));
@@ -84,67 +93,71 @@ int16_t UbxGpsI2C::sendUbx(UbxClassId class_id, uint8_t id, uint16_t req_len,
     uint16_t rx_len = req_len;
     int16_t ret = -1;
 
-    if (max(req_len, tx_len) > _buf_size - UBX_MIN_BUFFER_LEN) {  // prevent buffer overflow
-        return ret;
-    }
+    if (_i2c) {
+        if (max(req_len, tx_len) > _buf_size - UBX_MIN_BUFFER_LEN) {  // prevent buffer overflow
+            return ret;
+        }
 
-    memset(_buf, 0, _buf_size);
+        memset(_buf, 0, _buf_size);
 
-    _buf[0] = SYNC_CHAR1;
-    _buf[1] = SYNC_CHAR2;
-    _buf[2] = class_id;
-    _buf[3] = id;
-    _buf[4] = static_cast<char>(tx_len);
-    _buf[5] = static_cast<char>(tx_len >> 8);
+        _buf[0] = SYNC_CHAR1;
+        _buf[1] = SYNC_CHAR2;
+        _buf[2] = class_id;
+        _buf[3] = id;
+        _buf[4] = static_cast<char>(tx_len);
+        _buf[5] = static_cast<char>(tx_len >> 8);
 
-    if (tx_len > 0) {
-        memcpy(_buf + 6, tx_data, tx_len);
-    }
+        if (tx_len > 0) {
+            memcpy(_buf + 6, tx_data, tx_len);
+        }
 
-    uint16_t ck = checksum(_buf, (6 + tx_len));
+        uint16_t ck = checksum(_buf, (6 + tx_len));
 
-    _buf[(6 + tx_len)] = (ck & 0xFF);
-    _buf[(7 + tx_len)] = (ck >> 8);
+        _buf[(6 + tx_len)] = (ck & 0xFF);
+        _buf[(7 + tx_len)] = (ck >> 8);
 
-    tx_len += UBX_MIN_BUFFER_LEN;  // include header + checksum
+        tx_len += UBX_MIN_BUFFER_LEN;  // include header + checksum
 
-    if (req_len > 0 || include_header_checksum) {
-        rx_len += (UBX_MIN_BUFFER_LEN);  // header, checksum
-    }
+        if (req_len > 0 || include_header_checksum) {
+            rx_len += (UBX_MIN_BUFFER_LEN);  // header, checksum
+        }
 
-    if ((rx_len + 10) < _buf_size) {  // extra space
-        rx_len += 10;
-    }
+        if ((rx_len + 10) < _buf_size) {  // extra space
+            rx_len += 10;
+        }
 
-    _i2c->lock();
-    ack = _i2c->write(_address, _buf, tx_len);
-    _i2c->unlock();
-
-    if (ack == 0) {
         _i2c->lock();
-        ack = _i2c->read(_address, _buf, rx_len);
+        ack = _i2c->write(_address, _buf, tx_len);
         _i2c->unlock();
 
         if (ack == 0) {
-            int16_t index = -1;
+            memset(_buf, 0, _buf_size);
 
-            for (uint16_t i = 0; i < rx_len; i++) {
-                if (_buf[i] == SYNC_CHAR1 && _buf[i + 1] == SYNC_CHAR2) {  // find index of SYNC_CHAR1
-                    index = i;
-                    break;
+            _i2c->lock();
+            ack = _i2c->read(_address, _buf, rx_len);
+            _i2c->unlock();
+
+            if (ack == 0) {
+                int16_t index = -1;
+
+                for (uint16_t i = 0; i < rx_len; i++) {
+                    if (_buf[i] == SYNC_CHAR1 && _buf[i + 1] == SYNC_CHAR2) {  // find index of SYNC_CHAR1
+                        index = i;
+                        break;
+                    }
                 }
-            }
 
-            if (index > -1) {
-                uint16_t size = ((_buf[index + 5] << 8) | _buf[index + 4]);
-                uint16_t ck = checksum(_buf, size + 6, index);  // exclude header and checksum
+                if (index > -1) {
+                    uint16_t size = ((_buf[index + 5] << 8) | _buf[index + 4]);
+                    uint16_t ck = checksum(_buf, size + 6, index);  // exclude header and checksum
 
-                if (_buf[index + size + 6] == (ck & 0xFF) && _buf[index + size + 7] == (ck >> 8)) {
-                    size = min(size, req_len);
-                    ret = (include_header_checksum ? size + UBX_MIN_BUFFER_LEN : size);
+                    if (_buf[index + size + 6] == (ck & 0xFF) && _buf[index + size + 7] == (ck >> 8)) {
+                        size = min(size, req_len);
+                        ret = (include_header_checksum ? size + UBX_MIN_BUFFER_LEN : size);
 
-                    for (uint16_t i = 0; i < ret; i++) {
-                        _buf[i] = _buf[i + index + (include_header_checksum ? 0 : (UBX_MIN_BUFFER_LEN - 2))];  // correct index
+                        for (uint16_t i = 0; i < ret; i++) {
+                            _buf[i] = _buf[i + index + (include_header_checksum ? 0 : (UBX_MIN_BUFFER_LEN - 2))];  // correct index
+                        }
                     }
                 }
             }
