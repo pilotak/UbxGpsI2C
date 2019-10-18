@@ -1,0 +1,13 @@
+{
+    "name": "UbxGpsI2C",
+    "config": {
+        "rx-size": {
+            "help": "Max size of rx buffer",
+            "value": 256
+        },
+        "tx-size": {
+            "help": "Max size of tx buffer",
+            "value": 48
+        }
+    }
+}

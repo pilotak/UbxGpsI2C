@@ -1,7 +1,7 @@
 /*
 MIT License
 
-Copyright (c) 2018 Pavel Slama
+Copyright (c) 2019 Pavel Slama
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal
@@ -25,137 +25,153 @@ SOFTWARE.
 #include "mbed.h"
 #include "UbxGpsI2C.h"
 
-UbxGpsI2C::UbxGpsI2C(char * buf, uint16_t buf_size, int8_t address):
-    _buf_size(buf_size),
+UbxGpsI2C::UbxGpsI2C(int8_t address):
+    _cb(NULL),
     _i2c_addr(address),
-    _req_len(0),
-    _include_header_checksum(false) {
-    _rx_buf = buf;
+    _req_len(0) {
 }
 
-UbxGpsI2C::UbxGpsI2C(PinName sda, PinName scl, char * buf, uint16_t buf_size, int8_t address, uint32_t frequency):
-    _buf_size(buf_size),
+UbxGpsI2C::UbxGpsI2C(PinName sda, PinName scl, int8_t address, uint32_t frequency):
+    _cb(NULL),
     _i2c_addr(address),
-    _req_len(0),
-    _include_header_checksum(false) {
+    _req_len(0) {
     _i2c = new (_i2c_buffer) I2C(sda, scl);
     _i2c->frequency(frequency);
-    _rx_buf = buf;
 }
 
 UbxGpsI2C::~UbxGpsI2C(void) {
+    _cb = NULL;
+
     if (_i2c == reinterpret_cast<I2C*>(_i2c_buffer)) {
         _i2c->~I2C();
     }
 }
 
-bool UbxGpsI2C::init(I2C * i2c_obj) {
-    if (i2c_obj) {
-        _i2c = i2c_obj;
+uint16_t UbxGpsI2C::checksum(const char * data, uint16_t payload_len) {
+    uint8_t ca = 0;
+    uint8_t cb = 0;
+    uint16_t res = 0;
+
+    for (uint16_t i = 2; i < (UBX_HEADER_LEN + payload_len); i++) {
+        ca += data[i];
+        cb += ca;
     }
 
-    if (_i2c && _rx_buf) {
-        if (sendUbx(UBX_CFG, CFG_PRT, NULL, 0, 20)) {
-            uint32_t flag = _event.wait_any(0b11, UBX_DEFAULT_TIMEOUT);
+    res =  (cb << 8) | ca;
 
-            if (flag == 0b01) {
-                cfg_prt_t cfg_prt;
-                memcpy(&cfg_prt, _rx_buf + 6, sizeof(cfg_prt_t));
-                cfg_prt.outProtoMask &= ~0b110;  // output only UBX
+    return res;
+}
 
-                char tx[sizeof(cfg_prt_t)];
-                memcpy(tx, &cfg_prt, sizeof(cfg_prt_t));
+bool UbxGpsI2C::correctIndex() {
+    uint16_t offset = USHRT_MAX;
 
-                if (sendUbxAck(UBX_CFG, CFG_PRT, tx, sizeof(cfg_prt_t))) {
-                    return true;
-                }
-            }
+    for (uint16_t i = 0; i < MBED_CONF_UBXGPSI2C_RX_SIZE; i++) {
+        if (buffer[i] == SYNC_CHAR1 && buffer[i + 1] == SYNC_CHAR2) {  // find index of SYNC_CHAR1
+            offset = i;
+            break;
         }
     }
 
-    return false;
-}
-
-bool UbxGpsI2C::send(uint8_t tx_len, uint16_t rx_len) {
-    if (_i2c->transfer(
-                _i2c_addr,
-                reinterpret_cast<char*>(_tx_buf),
-                tx_len,
-                _rx_buf,
-                rx_len,
-                event_callback_t(this, &UbxGpsI2C::internalCb),
-                I2C_EVENT_ALL) == 0) {
+    if (offset != USHRT_MAX) {
+        memmove(buffer, buffer + offset, MBED_CONF_UBXGPSI2C_RX_SIZE - offset);
         return true;
     }
 
-    _event.set(0b10);
+    return false;
+}
+
+bool UbxGpsI2C::init(event_callback_t cb, I2C * i2c_obj) {
+    cfg_prt_t cfg_prt;
+    _cb = cb;
+
+    if (i2c_obj != NULL) {
+        _i2c = i2c_obj;
+    }
+
+    if (_i2c != NULL) {
+        uint16_t len = packetBuilder(UBX_CFG, CFG_PRT, NULL, 0);
+
+        if (len != USHRT_MAX) {
+            uint16_t size = writeReadSync(len);
+
+            if (size != USHRT_MAX) {
+                if (size == sizeof(cfg_prt_t)) {
+                    memcpy(&cfg_prt, buffer + UBX_HEADER_LEN, sizeof(cfg_prt_t));
+                    cfg_prt.outProtoMask &= ~0b110;  // output only UBX
+
+                    memcpy(_tx_buf, &cfg_prt, sizeof(cfg_prt_t));
+
+                    if (sendUbxAck(UBX_CFG, CFG_PRT, _tx_buf, sizeof(cfg_prt_t))) {
+                        return true;
+                    }
+                }
+            }
+        }
+    }
 
     return false;
 }
 
-void UbxGpsI2C::internalCb(int event) {
-    bool data_ok = false;
+void UbxGpsI2C::internalCb(int event) {  // ISR
+    bool corrected = true;
 
-    if (event & I2C_EVENT_ERROR_NO_SLAVE) {
-        if (_done_cb) {
-            _done_cb.call(-1);
-        }
-
-    } else if (event & I2C_EVENT_ERROR) {
-        if (_done_cb) {
-            _done_cb.call(-2);
-        }
-
-    } else {
-        if (_req_len > 0) {
-            int16_t index = -1;
-
-            for (uint16_t i = 0; i < _buf_size; i++) {
-                if (_rx_buf[i] == SYNC_CHAR1 && _rx_buf[i + 1] == SYNC_CHAR2) {  // find index of SYNC_CHAR1
-                    index = i;
-                    break;
-                }
-            }
-
-            if (index > -1) {
-                uint16_t size = ((_rx_buf[index + 5] << 8) | _rx_buf[index + 4]);
-
-                if (_req_len <= size) {
-                    uint16_t ck = checksum(_rx_buf, size + 6, index);  // exclude header and checksum
-
-                    if (_rx_buf[index + size + 6] == (ck & 0xFF) && _rx_buf[index + size + 7] == (ck >> 8)) {
-                        uint16_t offset = (_include_header_checksum ? 0 : 6);
-
-                        for (uint16_t i = 0; i < size + (_include_header_checksum ? 8 : 0) ; ++i) {  // data len + header + checksum
-                            _rx_buf[i] = _rx_buf[i + index + offset];  // correct index
-                        }
-
-                        data_ok = true;
-                        _event.set(0b01);
-
-                        if (_done_cb) {
-                            _done_cb.call(size + (_include_header_checksum ? 6 : 0));  // data len + header + checksum
-                        }
-                    }
-                }
-            }
-
-        } else if (_done_cb) {
-            _done_cb.call(0);
-        }
+    if ((event & 0b10000) == 0) {  // data not sorted
+        corrected = correctIndex();
     }
 
-    if (!data_ok) {
-        _event.set(0b10);
+    if (corrected) {
+        uint16_t payload_len = ((buffer[5] << 8) | buffer[4]);
+
+        if ((UBX_HEADER_LEN + payload_len) <= MBED_CONF_UBXGPSI2C_RX_SIZE) {
+            uint16_t ck = checksum(buffer, payload_len);
+
+            if (buffer[payload_len + UBX_HEADER_LEN] == (ck & 0xFF) && buffer[payload_len + UBX_HEADER_LEN + 1] == (ck >> 8)) {
+                if (_req_len == payload_len && _cb) {
+                    _cb.call(payload_len);  // data len + header + checksum
+                }
+            }
+        }
     }
 }
 
-bool UbxGpsI2C::sendUbxAck(UbxClassId class_id, uint8_t id, const char * data, uint16_t tx_len) {
-    if (sendUbx(class_id, id, data, tx_len, 2)) {
-        uint32_t flag = _event.wait_any(0b11, UBX_DEFAULT_TIMEOUT);
+uint16_t UbxGpsI2C::packetBuilder(UbxClassId class_id, uint8_t id, const char * data, uint16_t data_len) {
+    if ((data_len + UBX_MIN_BUFFER_LEN) <= MBED_CONF_UBXGPSI2C_TX_SIZE) {
+        _tx_buf[0] = SYNC_CHAR1;
+        _tx_buf[1] = SYNC_CHAR2;
+        _tx_buf[2] = class_id;
+        _tx_buf[3] = id;
+        _tx_buf[4] = data_len & UCHAR_MAX;
+        _tx_buf[5] = (data_len >> 8) & UCHAR_MAX;
 
-        if (flag == 0b01) {
-            if (_rx_buf[2] == UBX_ACK && _rx_buf[3] == ACK_ACK && _rx_buf[6] == class_id && _rx_buf[7] == id) {
+        if (data != NULL && data_len > 0) {
+            memcpy(_tx_buf + UBX_HEADER_LEN, data, data_len);
+        }
+
+        uint16_t ck = checksum(_tx_buf, data_len);
+
+        _tx_buf[(UBX_HEADER_LEN + data_len)] = (ck & 0xFF);
+        _tx_buf[(UBX_HEADER_LEN + 1 + data_len)] = (ck >> 8);
+
+        return (UBX_MIN_BUFFER_LEN + data_len);  // header + checksum + data_len
+    }
+
+    return USHRT_MAX;
+}
+
+bool UbxGpsI2C::sendUbx(UbxClassId class_id, uint8_t id, const char * data, uint16_t data_len, uint16_t rx_len) {
+    if (_i2c != NULL) {
+        uint16_t len = packetBuilder(class_id, id, data, data_len);
+        _req_len = rx_len;
+
+        if (len != USHRT_MAX) {
+            if (_i2c->transfer(
+                        _i2c_addr,
+                        _tx_buf,
+                        len,
+                        buffer,
+                        MBED_CONF_UBXGPSI2C_RX_SIZE,
+                        event_callback_t(this, &UbxGpsI2C::internalCb),
+                        I2C_EVENT_TRANSFER_COMPLETE) == 0) {
                 return true;
             }
         }
@@ -164,56 +180,58 @@ bool UbxGpsI2C::sendUbxAck(UbxClassId class_id, uint8_t id, const char * data, u
     return false;
 }
 
-bool UbxGpsI2C::sendUbx(UbxClassId class_id, uint8_t id, const char * data, uint16_t tx_len, uint16_t rx_len, event_callback_t function,
-                        bool include_header_checksum) {
-    _done_cb = function;
-    _req_len = rx_len;
-    _include_header_checksum = include_header_checksum;
+bool UbxGpsI2C::sendUbxAck(UbxClassId class_id, uint8_t id, const char * data, uint16_t data_len, uint16_t rx_len) {
+    uint16_t len = packetBuilder(class_id, id, data, data_len);
 
-    if (tx_len > (UBX_TX_BUFFER_SIZE - 8)) {  // prevent buffer overflow
-        return false;
-    }
+    if (len != USHRT_MAX) {
+        uint16_t payload_len = writeReadSync(len);
 
-    _tx_buf[0] = SYNC_CHAR1;
-    _tx_buf[1] = SYNC_CHAR2;
-    _tx_buf[2] = class_id;
-    _tx_buf[3] = id;
-    _tx_buf[4] = static_cast<char>(tx_len);
-    _tx_buf[5] = static_cast<char>(tx_len >> 8);
+        if (payload_len != USHRT_MAX) {
+            if (buffer[2] == UBX_ACK && buffer[3] == ACK_ACK && buffer[6] == class_id && buffer[7] == id) {
+                if (rx_len > 0) {
+                    _req_len = rx_len;
+                    internalCb(0b10000);  // data already sorted
+                }
 
-    if (tx_len > 0) {
-        memcpy(_tx_buf + 6, data, tx_len);
-    }
-
-    uint16_t ck = checksum(_tx_buf, (6 + tx_len));
-
-    _tx_buf[(6 + tx_len)] = (ck & 0xFF);
-    _tx_buf[(7 + tx_len)] = (ck >> 8);
-
-    if (rx_len > 0) {
-        rx_len += (8 + 10);  // header, checksum + extra space
-    }
-
-    if (send((8 + tx_len), rx_len)) {
-        return true;
+                return true;
+            }
+        }
     }
 
     return false;
 }
 
-uint16_t UbxGpsI2C::checksum(const char * data, uint16_t len, uint16_t offset) {
-    uint32_t ca = 0;
-    uint32_t cb = 0;
-    uint16_t res = 0;
+uint16_t UbxGpsI2C::writeReadSync(uint16_t data_len) {
+    int32_t ack;
 
-    if (data && len >= 6) {  // min msg length is 8 bytes including checksum
-        for (uint16_t i = (2 + offset); i < (len + offset); i++) {  // calculate checksum, exclude sync chars
-            ca += data[i];
-            cb += ca;
+    if (_i2c != NULL) {
+        _i2c->lock();
+        ack = _i2c->write(_i2c_addr, _tx_buf, data_len);
+        _i2c->unlock();
+
+        if (ack == 0) {
+            memset(buffer, UCHAR_MAX, MBED_CONF_UBXGPSI2C_RX_SIZE);
+
+            _i2c->lock();
+            ack = _i2c->read(_i2c_addr, buffer, MBED_CONF_UBXGPSI2C_RX_SIZE);
+            _i2c->unlock();
+
+            if (ack == 0) {
+                if (correctIndex()) {
+                    uint16_t payload_len = ((buffer[5] << 8) | buffer[4]);
+
+                    if ((UBX_HEADER_LEN + payload_len) <= MBED_CONF_UBXGPSI2C_RX_SIZE) {
+                        uint16_t ck = checksum(buffer, payload_len);
+
+                        if (buffer[UBX_HEADER_LEN + payload_len] == (ck & UCHAR_MAX) &&
+                                buffer[UBX_HEADER_LEN + payload_len + 1] == ((ck >> 8))) {
+                            return payload_len;
+                        }
+                    }
+                }
+            }
         }
-
-        res =  ((cb & 0xFF) << 8) | (ca & 0xFF);
     }
 
-    return res;
+    return USHRT_MAX;
 }
