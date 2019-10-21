@@ -33,6 +33,7 @@ UbxGpsI2C::UbxGpsI2C(int8_t address):
 UbxGpsI2C::UbxGpsI2C(PinName sda, PinName scl, int8_t address, uint32_t frequency):
     _cb(NULL),
     _i2c_addr(address) {
+    ThisThread::sleep_for(100);
     _i2c = new (_i2c_buffer) I2C(sda, scl);
     _i2c->frequency(frequency);
 }

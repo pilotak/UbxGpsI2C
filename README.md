@@ -6,9 +6,8 @@ Asynch I2C library for mbed to use Ublox GPS using ubx protocol only
 #include "mbed.h"
 #include "UbxGpsI2C.h"
 
-char buf[112];  // longest requested len + 8 for header + 10 extra space
-
-UbxGpsI2C gps(PC_9, PA_8, buf, sizeof(buf));  // sda, scl, pointer to buffer, size of buffer
+EventQueue eQueue(32 * EVENTS_EVENT_SIZE);
+UbxGpsI2C gps(I2C_SDA, I2C_SCL);
 
 struct gps_data_t {
     uint32_t itow;
@@ -44,33 +43,41 @@ struct gps_data_t {
     uint8_t reserved2;
 } gps_data;
 
+void print() {
+    printf("fix: %u lat: %li lon: %li\n", gps_data.fixType, gps_data.lat, gps_data.lon);
+}
 
-void data(int len) {
-    printf("data[%i]: \n", len);
-
-    for (int i = 0; i < len; ++i) {
-        printf("%02X ", buf[i]);
-    }
-
-    printf("\n");
-
-    if (len == 92) {
-        memcpy(&gps_data, buf, len);
-        printf("lat: %lu lon:%lu\n", gps_data.lat, gps_data.lon);
+void data(int len) {  // ISR
+    if (gps.buffer[2] == UbxGpsI2C::UBX_NAV && gps.buffer[3] == 0x07) {
+        memcpy(&gps_data, gps.buffer + UBX_HEADER_LEN, len);
+        eQueue.call(print);
     }
 }
 
-
 int main() {
-    if (gps.init()) {
+    ThisThread::sleep_for(200);
+    Thread eQueueThread(osPriorityAboveNormal1);
+
+    if (eQueueThread.start(callback(&eQueue, &EventQueue::dispatch_forever)) != osOK) {
+        printf("eQueueThread error\n");
+    }
+
+    // DO NOT try event queue for callback (eQeue.event(callback(data)))
+    // gps.buffer must be read in ISR due to DMA access
+    if (gps.init(&data) && gps.setOutputRate(500)) {
         while (1) {
-            // uBlox class, message id, nothing to send, zero tx len, expecting 92 bytes of payload, callback, include header and checksum in buffer
-            gps.sendUbx(UbxGpsI2C::UBX_NAV, 0x07, NULL, 0, 92, callback(data), false);
-            wait_ms(200);
+            if (gps.sendUbx(UbxGpsI2C::UBX_NAV, 0x07)) {  // NAV-PVT
+                printf("Request OK\n");
+
+            } else {
+                printf("Request failed\n");
+            }
+
+            ThisThread::sleep_for(1000);
         }
 
     } else {
-        printf("cound not init\n");
+        printf("Cound not init\n");
         MBED_ASSERT(false);
     }
 }
@@ -81,11 +88,9 @@ int main() {
 #include "mbed.h"
 #include "UbxGpsI2C.h"
 
-I2C i2c(PC_9, PA_8);
-
-char buf[112];  // longest requested len + 8 for header + 10 extra space
-
-UbxGpsI2C gps(buf, sizeof(buf));  // pointer to buffer, size of buffer
+EventQueue eQueue(32 * EVENTS_EVENT_SIZE);
+I2C i2c(I2C_SDA, I2C_SCL);
+UbxGpsI2C gps;
 
 struct gps_data_t {
     uint32_t itow;
@@ -121,33 +126,41 @@ struct gps_data_t {
     uint8_t reserved2;
 } gps_data;
 
+void print() {
+    printf("fix: %u lat: %li lon: %li\n", gps_data.fixType, gps_data.lat, gps_data.lon);
+}
 
-void data(int len) {
-    printf("data[%i]: \n", len);
-
-    for (int i = 0; i < len; ++i) {
-        printf("%02X ", buf[i]);
-    }
-
-    printf("\n");
-
-    if (len == 92) {
-        memcpy(&gps_data, buf, len);
-        printf("lat: %lu lon:%lu\n", gps_data.lat, gps_data.lon);
+void data(int len) {  // ISR
+    if (gps.buffer[2] == UbxGpsI2C::UBX_NAV && gps.buffer[3] == 0x07) {
+        memcpy(&gps_data, gps.buffer + UBX_HEADER_LEN, len);
+        eQueue.call(print);
     }
 }
 
-
 int main() {
-    if (gps.init(&i2c)) {
+    ThisThread::sleep_for(200);
+    Thread eQueueThread(osPriorityAboveNormal1);
+
+    if (eQueueThread.start(callback(&eQueue, &EventQueue::dispatch_forever)) != osOK) {
+        printf("eQueueThread error\n");
+    }
+
+    // DO NOT try event queue for callback (eQeue.event(callback(data)))
+    // gps.buffer must be read in ISR due to DMA access
+    if (gps.init(&data, &i2c) && gps.setOutputRate(500)) {
         while (1) {
-            // uBlox class, message id, nothing to send, zero tx len, expecting 92 bytes of payload, callback, include header and checksum in buffer
-            gps.sendUbx(UbxGpsI2C::UBX_NAV, 0x07, NULL, 0, 92, callback(data), false);
-            wait_ms(200);
+            if (gps.sendUbx(UbxGpsI2C::UBX_NAV, 0x07)) {  // NAV-PVT
+                printf("Request OK\n");
+
+            } else {
+                printf("Request failed\n");
+            }
+
+            ThisThread::sleep_for(1000);
         }
 
     } else {
-        printf("cound not init\n");
+        printf("Cound not init\n");
         MBED_ASSERT(false);
     }
 }
