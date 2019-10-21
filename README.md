@@ -38,9 +38,9 @@ struct gps_data_t {
     uint32_t sAcc;
     uint32_t headAcc;
     uint16_t pDOP;
-    uint8_t reserved1;
+    uint8_t reserved1[6];
     int32_t headVeh;
-    uint8_t reserved2;
+    uint8_t reserved2[4];
 } gps_data;
 
 void print() {
@@ -122,9 +122,9 @@ struct gps_data_t {
     uint32_t sAcc;
     uint32_t headAcc;
     uint16_t pDOP;
-    uint8_t reserved1;
+    uint8_t reserved1[6];
     int32_t headVeh;
-    uint8_t reserved2;
+    uint8_t reserved2[4];
 } gps_data;
 
 void print() {
