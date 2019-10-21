@@ -47,10 +47,12 @@ void print() {
     printf("fix: %u lat: %li lon: %li\n", gps_data.fixType, gps_data.lat, gps_data.lon);
 }
 
-void data(int len) {  // ISR
+void data(int payload_len) {  // ISR
     if (gps.buffer[2] == UbxGpsI2C::UBX_NAV && gps.buffer[3] == 0x07) {
-        memcpy(&gps_data, gps.buffer + UBX_HEADER_LEN, len);
-        eQueue.call(print);
+        if (payload_len == sizeof(gps_data_t)) {
+            memcpy(&gps_data, gps.buffer + UBX_HEADER_LEN, sizeof(gps_data_t));
+            eQueue.call(print);
+        }
     }
 }
 
@@ -129,10 +131,12 @@ void print() {
     printf("fix: %u lat: %li lon: %li\n", gps_data.fixType, gps_data.lat, gps_data.lon);
 }
 
-void data(int len) {  // ISR
+void data(int payload_len) {  // ISR
     if (gps.buffer[2] == UbxGpsI2C::UBX_NAV && gps.buffer[3] == 0x07) {
-        memcpy(&gps_data, gps.buffer + UBX_HEADER_LEN, len);
-        eQueue.call(print);
+        if (payload_len == sizeof(gps_data_t)) {
+            memcpy(&gps_data, gps.buffer + UBX_HEADER_LEN, sizeof(gps_data_t));
+            eQueue.call(print);
+        }
     }
 }
 
