@@ -31,11 +31,12 @@ SOFTWARE.
 #define UBX_MIN_BUFFER_LEN 8
 #define UBX_HEADER_LEN     6
 
-#define SYNC_CHAR1 0xB5
-#define SYNC_CHAR2 0x62
+#define UBX_SYNC_CHAR1 0xB5
+#define UBX_SYNC_CHAR2 0x62
 
-#define CFG_PRT 0x00
-#define ACK_ACK 0x01
+#define CFG_PRT  0x00
+#define CFG_RATE 0x08
+#define ACK_ACK  0x01
 
 class UbxGpsI2C {
   public:
@@ -60,8 +61,10 @@ class UbxGpsI2C {
     UbxGpsI2C(PinName sda, PinName scl, int8_t address = UBX_DEFAULT_ADDRESS, uint32_t frequency = 400000);
     virtual ~UbxGpsI2C(void);
     bool init(event_callback_t cb, I2C * i2c_obj = NULL);
-    bool sendUbx(UbxClassId class_id, uint8_t id, const char * data, uint16_t data_len, uint16_t rx_len = 0);
-    bool sendUbxAck(UbxClassId class_id, uint8_t id, const char * data, uint16_t data_len, uint16_t rx_len = 0);
+    bool sendUbx(UbxClassId class_id, uint8_t id, const char * data = NULL, uint16_t data_len = 0);
+    uint16_t sendUbxSync(UbxClassId class_id, uint8_t id, const char * data = NULL, uint16_t data_len = 0);
+    bool sendUbxSyncAck(UbxClassId class_id, uint8_t id, const char * data = NULL, uint16_t data_len = 0);
+    bool setOutputRate(uint16_t ms, uint16_t cycles = 1);
 
     char buffer[MBED_CONF_UBXGPSI2C_RX_SIZE];
 
@@ -78,21 +81,23 @@ class UbxGpsI2C {
         uint8_t reserved2[2];
     };
 
-    uint16_t checksum(const char * data, uint16_t payload_len);
-    bool     correctIndex();
-    uint16_t packetBuilder(UbxClassId class_id, uint8_t id, const char * data, uint16_t data_len);
-    uint16_t writeReadSync(uint16_t data_len);
-
-    char _tx_buf[MBED_CONF_UBXGPSI2C_TX_SIZE];
+    struct cfg_rate_t {
+        uint16_t measRate;
+        uint16_t navRate;
+        uint16_t timeRef;
+    };
 
   private:
     I2C * _i2c;
     event_callback_t _cb;
     const int8_t _i2c_addr;
-    uint16_t _req_len;
     uint32_t _i2c_buffer[sizeof(I2C) / sizeof(uint32_t)];
+    char _tx_buf[MBED_CONF_UBXGPSI2C_TX_SIZE];
 
-    void internalCb(int event);
+    bool     correctIndex();
+    uint16_t checksum(const char * data, uint16_t payload_len);
+    uint16_t packetBuilder(UbxClassId class_id, uint8_t id, const char * data, uint16_t data_len);
+    void     internalCb(int event);
 };
 
 #endif  // UBXGPSI2C_H
