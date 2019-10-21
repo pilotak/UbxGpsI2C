@@ -55,8 +55,7 @@ void data(int len) {  // ISR
 }
 
 int main() {
-    ThisThread::sleep_for(200);
-    Thread eQueueThread(osPriorityAboveNormal1);
+    Thread eQueueThread;
 
     if (eQueueThread.start(callback(&eQueue, &EventQueue::dispatch_forever)) != osOK) {
         printf("eQueueThread error\n");
@@ -138,8 +137,7 @@ void data(int len) {  // ISR
 }
 
 int main() {
-    ThisThread::sleep_for(200);
-    Thread eQueueThread(osPriorityAboveNormal1);
+    Thread eQueueThread;
 
     if (eQueueThread.start(callback(&eQueue, &EventQueue::dispatch_forever)) != osOK) {
         printf("eQueueThread error\n");
