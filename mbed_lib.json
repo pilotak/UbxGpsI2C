@@ -3,7 +3,7 @@
     "config": {
         "rx-size": {
             "help": "Max size of rx buffer",
-            "value": 1024
+            "value": 256
         },
         "tx-size": {
             "help": "Max size of tx buffer",

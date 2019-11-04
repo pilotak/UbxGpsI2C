@@ -84,7 +84,7 @@ bool UbxGpsI2C::correctIndex() {
 
 bool UbxGpsI2C::setOutputRate(uint16_t ms, uint16_t cycles) {
     cfg_rate_t cfg_rate;
-    uint16_t payload_len = sendUbxSync(UBX_CFG, CFG_RATE);  // read current setting
+    uint16_t payload_len = sendUbxSync(UBX_CFG, UBX_CFG_RATE);  // read current setting
 
     if (payload_len == sizeof(cfg_rate_t)) {
         memcpy(&cfg_rate, buffer + UBX_HEADER_LEN, sizeof(cfg_rate_t));
@@ -93,7 +93,7 @@ bool UbxGpsI2C::setOutputRate(uint16_t ms, uint16_t cycles) {
 
         memcpy(_tx_buf, &cfg_rate, sizeof(cfg_rate_t));
 
-        if (sendUbxSyncAck(UBX_CFG, CFG_RATE, _tx_buf, sizeof(cfg_rate_t))) {
+        if (sendUbxSyncAck(UBX_CFG, UBX_CFG_RATE, _tx_buf, sizeof(cfg_rate_t))) {
             return true;
         }
     }
@@ -110,7 +110,7 @@ bool UbxGpsI2C::init(event_callback_t cb, I2C * i2c_obj) {
     }
 
     char data = 0;  // DDC port
-    uint16_t payload_len = sendUbxSync(UBX_CFG, CFG_PRT, &data, 1);  // read current setting
+    uint16_t payload_len = sendUbxSync(UBX_CFG, UBX_CFG_PRT, &data, 1);  // read current setting
 
     if (payload_len == sizeof(cfg_prt_t)) {
         memcpy(&cfg_prt, buffer + UBX_HEADER_LEN, sizeof(cfg_prt_t));
@@ -118,7 +118,7 @@ bool UbxGpsI2C::init(event_callback_t cb, I2C * i2c_obj) {
 
         memcpy(_tx_buf, &cfg_prt, sizeof(cfg_prt_t));
 
-        if (sendUbxSyncAck(UBX_CFG, CFG_PRT, _tx_buf, sizeof(cfg_prt_t))) {
+        if (sendUbxSyncAck(UBX_CFG, UBX_CFG_PRT, _tx_buf, sizeof(cfg_prt_t))) {
             return true;
         }
     }
@@ -126,34 +126,8 @@ bool UbxGpsI2C::init(event_callback_t cb, I2C * i2c_obj) {
     return false;
 }
 
-void UbxGpsI2C::internalCb(int event) {  // ISR
-    int ret = -1;
-
-    if (correctIndex()) {
-        uint16_t payload_len = ((buffer[5] << 8) | buffer[4]);
-
-        if ((UBX_HEADER_LEN + payload_len) <= MBED_CONF_UBXGPSI2C_RX_SIZE) {
-            uint16_t ck = checksum(buffer, payload_len);
-
-            if (buffer[payload_len + UBX_HEADER_LEN] == (ck & 0xFF) && buffer[payload_len + UBX_HEADER_LEN + 1] == (ck >> 8)) {
-                ret = payload_len;  // data len + header + checksum
-
-            } else {
-                ret = -3;
-            }
-
-        } else {
-            ret = -2;
-        }
-    }
-
-    if (_cb) {
-        _cb.call(ret);  // data len + header + checksum
-    }
-}
-
 uint16_t UbxGpsI2C::packetBuilder(UbxClassId class_id, uint8_t id, const char * data, uint16_t data_len) {
-    if ((data_len + UBX_MIN_BUFFER_LEN) <= MBED_CONF_UBXGPSI2C_TX_SIZE) {
+    if ((data_len + UBX_HEADER_LEN + UBX_CHECKSUM_LEN) <= MBED_CONF_UBXGPSI2C_TX_SIZE) {
         if (data != NULL && data_len > 0) {
             if (data == _tx_buf) {
                 memmove(_tx_buf + UBX_HEADER_LEN, _tx_buf, data_len);
@@ -161,7 +135,6 @@ uint16_t UbxGpsI2C::packetBuilder(UbxClassId class_id, uint8_t id, const char * 
             } else {
                 memcpy(_tx_buf + UBX_HEADER_LEN, data, data_len);
             }
-
         }
 
         _tx_buf[0] = UBX_SYNC_CHAR1;
@@ -176,27 +149,25 @@ uint16_t UbxGpsI2C::packetBuilder(UbxClassId class_id, uint8_t id, const char * 
         _tx_buf[(UBX_HEADER_LEN + data_len)] = (ck & 0xFF);
         _tx_buf[(UBX_HEADER_LEN + 1 + data_len)] = (ck >> 8);
 
-        return (UBX_MIN_BUFFER_LEN + data_len);  // header + checksum + data_len
+        return (UBX_HEADER_LEN + UBX_CHECKSUM_LEN + data_len); // header + checksum + data_len
     }
 
     return USHRT_MAX;
 }
 
 bool UbxGpsI2C::sendUbx(UbxClassId class_id, uint8_t id, const char * data, uint16_t data_len) {
-    if (_i2c != NULL) {
-        uint16_t len = packetBuilder(class_id, id, data, data_len);
+    uint16_t len = packetBuilder(class_id, id, data, data_len);
 
-        if (len != USHRT_MAX) {
-            if (_i2c->transfer(
-                        _i2c_addr,
-                        _tx_buf,
-                        len,
-                        buffer,
-                        MBED_CONF_UBXGPSI2C_RX_SIZE,
-                        event_callback_t(this, &UbxGpsI2C::internalCb),
-                        I2C_EVENT_ALL) == 0) {
-                return true;
-            }
+    if (len != USHRT_MAX) {
+        if (_i2c != NULL && _i2c->transfer(
+                    _i2c_addr,
+                    _tx_buf,
+                    len,
+                    buffer,
+                    MBED_CONF_UBXGPSI2C_RX_SIZE,
+                    _cb,
+                    I2C_EVENT_ALL) == 0) {
+            return true;
         }
     }
 
@@ -260,9 +231,76 @@ bool UbxGpsI2C::sendUbxSyncAck(UbxClassId class_id, uint8_t id, const char * dat
     uint16_t payload_len = sendUbxSync(class_id, id, data, data_len);
 
     if (payload_len > 0 && payload_len != USHRT_MAX) {
-        if (buffer[2] == UBX_ACK && buffer[3] == ACK_ACK && buffer[6] == class_id && buffer[7] == id) {
+        if (buffer[2] == UBX_ACK && buffer[3] == UBX_ACK_ACK && buffer[6] == class_id && buffer[7] == id) {
             return true;
         }
+    }
+
+    return false;
+}
+
+bool UbxGpsI2C::setOdometer(bool enable, UbxOdoProfile profile, uint8_t velocity_filter) {
+    uint16_t payload_len = sendUbxSync(UBX_CFG, UBX_CFG_ODO);  // read current setting
+
+    if (payload_len == sizeof(odometer_t)) {
+        odometer_t odo;
+        memcpy(&odo, buffer + UBX_HEADER_LEN, sizeof(odometer_t));
+
+        odo.odoCfg &= ~0b111;
+        odo.odoCfg |= (uint8_t)profile;
+
+        if (velocity_filter > 0) {
+            odo.flags |= 0b100;
+
+        } else {
+            odo.flags &= ~0b100;
+        }
+
+        odo.velLpGain = velocity_filter;
+
+        if (enable) {
+            odo.flags |= 0b1;
+
+        } else {
+            odo.flags &= ~0b1;
+        }
+
+        memcpy(_tx_buf, &odo, sizeof(odometer_t));
+
+        if (sendUbxSyncAck(UBX_CFG, UBX_CFG_ODO, _tx_buf, sizeof(odometer_t))) {
+            return true;
+        }
+    }
+
+    return false;
+}
+
+bool UbxGpsI2C::resetOdometer() {
+    if (sendUbxSyncAck(UBX_NAV, UBX_NAV_RESETODO)) {
+        return true;
+    }
+
+    return false;
+}
+
+bool UbxGpsI2C::autoSend(UbxClassId class_id, uint8_t id, uint8_t rate) {
+    _tx_buf[0] = class_id;
+    _tx_buf[1] = id;
+    _tx_buf[2] = rate;
+
+    return sendUbxSyncAck(UBX_CFG, UBX_CFG_MSG, _tx_buf, 3);
+}
+
+bool UbxGpsI2C::poll() {
+    if (_i2c != NULL && _i2c->transfer(
+                _i2c_addr,
+                NULL,
+                0,
+                buffer,
+                MBED_CONF_UBXGPSI2C_RX_SIZE,
+                _cb,
+                I2C_EVENT_ALL) == 0) {
+        return true;
     }
 
     return false;
