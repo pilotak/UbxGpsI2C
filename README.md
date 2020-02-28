@@ -1,13 +1,15 @@
 # UbxGpsI2C
-Ublox GPS I2C async library for mbed. All config messages are sent in blocking mode while `poll()` is asynch menthod to get buffer with data from GPS.
+Ublox GPS I2C async library for mbed.
 
 ## Example
 ```cpp
 #include "mbed.h"
 #include "UbxGpsI2C.h"
 
-EventQueue eQueue(32 * EVENTS_EVENT_SIZE);
-UbxGpsI2C gps(I2C_SDA, I2C_SCL);
+#define GPS_READ_INTERVAL 1000
+
+EventQueue eQueue(1 * EVENTS_EVENT_SIZE);
+UbxGpsI2C gps(I2C_SDA, I2C_SCL, &eQueue);
 
 struct gps_data_t {
     uint32_t itow;
@@ -52,62 +54,38 @@ struct odo_data_t {
     uint32_t distanceStd;
 } odo_data;
 
-void printPVT() {
+void gpsPVT() {
+    memcpy(&gps_data, gps.data + UBX_HEADER_LEN, sizeof(gps_data_t));
     printf("fix: %u lat: %li lon: %li\n", gps_data.fixType, gps_data.lat, gps_data.lon);
 }
 
-void printOdo() {
+void gpsOdo() {
+    memcpy(&odo_data, gps.data + UBX_HEADER_LEN, sizeof(odo_data_t));
     printf("Odo: %lu\n", odo_data.distance);
 }
 
-void data(int event) {  // ISR
-    if (event > I2C_EVENT_ERROR_NO_SLAVE) {
-        for (uint16_t i = 0; i < MBED_CONF_UBXGPSI2C_RX_SIZE; i++) {
-            if (gps.buffer[i] == UBX_SYNC_CHAR1 && gps.buffer[i + 1] == UBX_SYNC_CHAR2) {  // find index of header
-                uint16_t payload_len = ((gps.buffer[5 + i] << 8) | gps.buffer[4 + i]);
-
-                if (payload_len <= (i + payload_len)) {  // fits into this buffer
-                    if (gps.buffer[2 + i] == UbxGpsI2C::UBX_NAV) {
-                        if (gps.buffer[3 + i] == UBX_NAV_PVT && payload_len == sizeof(gps_data_t)) {
-                            memcpy(&gps_data, gps.buffer + i + UBX_HEADER_LEN, sizeof(gps_data_t));
-                            eQueue.call(printPVT);
-
-                        } else if (gps.buffer[3 + i] == UBX_NAV_ODO && payload_len == sizeof(odo_data_t)) {
-                            memcpy(&odo_data, gps.buffer + i + UBX_HEADER_LEN, sizeof(odo_data_t));
-                            eQueue.call(printOdo);
-                        }
-                    }
-
-                    i += (payload_len + UBX_CHECKSUM_LEN + UBX_HEADER_LEN - 1);
-
-                    if (gps.buffer[i + 1] != UBX_SYNC_CHAR1) {  // no more valid data
-                        break;
-                    }
-                }
-            }
-        }
-    }
-}
-
 int main() {
-    Thread eQueueThread;;
+    Thread eQueueThread;
 
     if (eQueueThread.start(callback(&eQueue, &EventQueue::dispatch_forever)) != osOK) {
         printf("eQueueThread error\n");
     }
 
-    // DO NOT try event queue for callback (eQeue.event(callback(data))) gps.buffer must be read in ISR due to DMA access
-    if (gps.init(&data)) {
-        if (gps.setOdometer(true, UbxGpsI2C::ODO_RUNNING)) {
-            if (gps.setOutputRate(1000)) {
-                if (gps.autoSend(UbxGpsI2C::UBX_NAV, UBX_NAV_ODO, 1)) {
-                    if (gps.autoSend(UbxGpsI2C::UBX_NAV, UBX_NAV_PVT, 1)) {
+    if (gps.init()) {
+        if (gps.set_odometer(true, UbxGpsI2C::ODO_RUNNING)) {
+            if (gps.set_output_rate(GPS_READ_INTERVAL)) {
+                if (gps.auto_send(UbxGpsI2C::UBX_NAV, UBX_NAV_ODO, 1)) {
+                    if (gps.auto_send(UbxGpsI2C::UBX_NAV, UBX_NAV_PVT, 1)) {
+
+                        gps.oob(UbxGpsI2C::UBX_NAV, UBX_NAV_PVT, gpsPVT);
+                        gps.oob(UbxGpsI2C::UBX_NAV, UBX_NAV_ODO, gpsOdo);
+
                         while (1) {
-                            if (!gps.poll()) {
+                            ThisThread::sleep_for(GPS_READ_INTERVAL);
+
+                            if (!gps.read()) {
                                 printf("Request failed\n");
                             }
-
-                            ThisThread::sleep_for(1000);
                         }
 
                     } else {
@@ -139,9 +117,11 @@ int main() {
 #include "mbed.h"
 #include "UbxGpsI2C.h"
 
-EventQueue eQueue(32 * EVENTS_EVENT_SIZE);
+#define GPS_READ_INTERVAL 1000
+
+EventQueue eQueue(1 * EVENTS_EVENT_SIZE);
 I2C i2c(I2C_SDA, I2C_SCL);
-UbxGpsI2C gps;
+UbxGpsI2C gps(&eQueue);
 
 struct gps_data_t {
     uint32_t itow;
@@ -186,62 +166,149 @@ struct odo_data_t {
     uint32_t distanceStd;
 } odo_data;
 
-void printPVT() {
+void gpsPVT() {
+    memcpy(&gps_data, gps.data + UBX_HEADER_LEN, sizeof(gps_data_t));
     printf("fix: %u lat: %li lon: %li\n", gps_data.fixType, gps_data.lat, gps_data.lon);
 }
 
-void printOdo() {
+void gpsOdo() {
+    memcpy(&odo_data, gps.data + UBX_HEADER_LEN, sizeof(odo_data_t));
     printf("Odo: %lu\n", odo_data.distance);
 }
 
-void data(int event) {  // ISR
-    if (event > I2C_EVENT_ERROR_NO_SLAVE) {
-        for (uint16_t i = 0; i < MBED_CONF_UBXGPSI2C_RX_SIZE; i++) {
-            if (gps.buffer[i] == UBX_SYNC_CHAR1 && gps.buffer[i + 1] == UBX_SYNC_CHAR2) {  // find index of header
-                uint16_t payload_len = ((gps.buffer[5 + i] << 8) | gps.buffer[4 + i]);
-
-                if (payload_len <= (i + payload_len)) {  // fits into this buffer
-                    if (gps.buffer[2 + i] == UbxGpsI2C::UBX_NAV) {
-                        if (gps.buffer[3 + i] == UBX_NAV_PVT && payload_len == sizeof(gps_data_t)) {
-                            memcpy(&gps_data, gps.buffer + i + UBX_HEADER_LEN, sizeof(gps_data_t));
-                            eQueue.call(printPVT);
-
-                        } else if (gps.buffer[3 + i] == UBX_NAV_ODO && payload_len == sizeof(odo_data_t)) {
-                            memcpy(&odo_data, gps.buffer + i + UBX_HEADER_LEN, sizeof(odo_data_t));
-                            eQueue.call(printOdo);
-                        }
-                    }
-
-                    i += (payload_len + UBX_CHECKSUM_LEN + UBX_HEADER_LEN - 1);
-
-                    if (gps.buffer[i + 1] != UBX_SYNC_CHAR1) {  // no more valid data
-                        break;
-                    }
-                }
-            }
-        }
-    }
-}
-
 int main() {
-    Thread eQueueThread;;
+    Thread eQueueThread;
 
     if (eQueueThread.start(callback(&eQueue, &EventQueue::dispatch_forever)) != osOK) {
         printf("eQueueThread error\n");
     }
 
-    // DO NOT try event queue for callback (eQeue.event(callback(data))) gps.buffer must be read in ISR due to DMA access
-    if (gps.init(&data, &i2c)) {
-        if (gps.setOdometer(true, UbxGpsI2C::ODO_RUNNING)) {
-            if (gps.setOutputRate(1000)) {
-                if (gps.autoSend(UbxGpsI2C::UBX_NAV, UBX_NAV_ODO, 1)) {
-                    if (gps.autoSend(UbxGpsI2C::UBX_NAV, UBX_NAV_PVT, 1)) {
+    i2c.frequency(400000);
+
+    if (gps.init(&i2c)) {
+        if (gps.set_odometer(true, UbxGpsI2C::ODO_RUNNING)) {
+            if (gps.set_output_rate(GPS_READ_INTERVAL)) {
+                if (gps.auto_send(UbxGpsI2C::UBX_NAV, UBX_NAV_ODO, 1)) {
+                    if (gps.auto_send(UbxGpsI2C::UBX_NAV, UBX_NAV_PVT, 1)) {
+
+                        gps.oob(UbxGpsI2C::UBX_NAV, UBX_NAV_PVT, gpsPVT);
+                        gps.oob(UbxGpsI2C::UBX_NAV, UBX_NAV_ODO, gpsOdo);
+
                         while (1) {
-                            if (!gps.poll()) {
+                            ThisThread::sleep_for(GPS_READ_INTERVAL);
+
+                            if (!gps.read()) {
                                 printf("Request failed\n");
                             }
+                        }
 
-                            ThisThread::sleep_for(1000);
+                    } else {
+                        printf("Auto PVT FAILED\n");
+                    }
+
+                } else {
+                    printf("Auto odo FAILED\n");
+                }
+
+            } else {
+                printf("PVT rate FAILED\n");
+            }
+
+        } else {
+            printf("Odo FAILED\n");
+        }
+
+    } else {
+        printf("Cound not init\n");
+    }
+
+    MBED_ASSERT(false);
+}
+```
+
+## Example with enabled debug
+`mbed_app.json`
+```json
+{
+    "config": {
+        "trace-level": {
+            "help": "Options are TRACE_LEVEL_ERROR,TRACE_LEVEL_WARN,TRACE_LEVEL_INFO,TRACE_LEVEL_DEBUG",
+            "macro_name": "MBED_TRACE_MAX_LEVEL",
+            "value": "TRACE_LEVEL_DEBUG"
+        }
+    },
+    "target_overrides": {
+        "*": {
+            "mbed-trace.enable": true
+        }
+    }
+}
+```
+
+```cpp
+#include "mbed.h"
+#include "UbxGpsI2C.h"
+
+#if MBED_CONF_MBED_TRACE_ENABLE
+#include "mbed-trace/mbed_trace.h"
+static Mutex trace_mutex;
+
+static void trace_wait() {
+    trace_mutex.lock();
+}
+
+static void trace_release() {
+    trace_mutex.unlock();
+}
+
+void trace_init() {
+    mbed_trace_init();
+    // mbed_trace_exclude_filters_set(const_cast<char*>("UBX "));
+
+    mbed_trace_mutex_wait_function_set(trace_wait);
+    mbed_trace_mutex_release_function_set(trace_release);
+}
+#endif
+
+#define GPS_READ_INTERVAL 1000
+
+EventQueue eQueue(1 * EVENTS_EVENT_SIZE);
+UbxGpsI2C gps(I2C_SDA, I2C_SCL, &eQueue);
+
+void gpsPVT() {
+    printf("PVT data\n");
+}
+
+void gpsOdo() {
+    printf("Odo data\n");
+}
+
+int main() {
+#if MBED_CONF_MBED_TRACE_ENABLE
+    trace_init();
+#endif
+
+    Thread eQueueThread;
+
+    if (eQueueThread.start(callback(&eQueue, &EventQueue::dispatch_forever)) != osOK) {
+        printf("eQueueThread error\n");
+    }
+
+    if (gps.init()) {
+        if (gps.set_odometer(true, UbxGpsI2C::ODO_RUNNING)) {
+            if (gps.set_output_rate(GPS_READ_INTERVAL)) {
+                if (gps.auto_send(UbxGpsI2C::UBX_NAV, UBX_NAV_ODO, 1)) {
+                    if (gps.auto_send(UbxGpsI2C::UBX_NAV, UBX_NAV_PVT, 1)) {
+
+                        gps.oob(UbxGpsI2C::UBX_NAV, UBX_NAV_PVT, gpsPVT);
+                        gps.oob(UbxGpsI2C::UBX_NAV, UBX_NAV_ODO, gpsOdo);
+
+                        while (1) {
+                            ThisThread::sleep_for(GPS_READ_INTERVAL);
+
+                            if (!gps.read()) {
+                                printf("Request failed\n");
+                            }
                         }
 
                     } else {
