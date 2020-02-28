@@ -25,6 +25,10 @@ SOFTWARE.
 #ifndef UBXGPSI2C_H
 #define UBXGPSI2C_H
 
+#if !defined(DEVICE_I2C_ASYNCH)
+    #error "This library only supports I2C in async mode";
+#endif
+
 #include "mbed.h"
 
 #include "mbed-trace/mbed_trace.h"
