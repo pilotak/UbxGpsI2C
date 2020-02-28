@@ -120,7 +120,7 @@ bool UbxGpsI2C::poll(bool await) {
             uint32_t sent = _flags.wait_any(UBX_FLAGS_TRANSFER_DONE, MBED_CONF_UBXGPSI2C_TIMEOUT);
 
             if (!(sent & UBX_FLAGS_TRANSFER_DONE)) {
-                tr_error("Previous transfer timeout");
+                tr_error("TX transfer timeout");
                 return false;
             }
 
@@ -527,7 +527,7 @@ bool UbxGpsI2C::init(I2C * i2c_obj) {
 }
 
 bool UbxGpsI2C::auto_send(UbxClassId class_id, char id, uint8_t rate) {
-    tr_info("Request to autosend CLASS: %02hhX, ID: %02hhX, rate: %ums", class_id, id, rate);
+    tr_info("Request to autosend CLASS: %02hhX, ID: %02hhX, rate: %u", class_id, id, rate);
     _buf[0] = class_id;
     _buf[1] = id;
     _buf[2] = rate;
