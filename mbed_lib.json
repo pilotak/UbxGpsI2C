@@ -1,13 +1,25 @@
 {
     "name": "UbxGpsI2C",
     "config": {
-        "rx-size": {
-            "help": "Max size of rx buffer",
+        "data-size": {
+            "help": "Max size of RX buffer",
             "value": 256
         },
-        "tx-size": {
-            "help": "Max size of tx buffer",
-            "value": 48
+        "buffer-size": {
+            "help": "Max size of TX buffer for I2C transfers",
+            "value": 32
+        },
+        "repeat-count": {
+            "help": "How many tries to request available data",
+            "value": 5
+        },
+        "repeat-delay": {
+            "help": "How long to wait before trying to request available data (ms)",
+            "value": 30
+        },
+        "timeout": {
+            "help": "Timeout for async calls (ms)",
+            "value": 200
         }
     }
 }
