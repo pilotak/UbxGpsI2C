@@ -32,7 +32,9 @@ SOFTWARE.
 #include "mbed.h"
 
 #include "mbed-trace/mbed_trace.h"
-#define TRACE_GROUP  "UBX "
+#ifndef TRACE_GROUP
+    #define TRACE_GROUP  "UBX "
+#endif
 
 #define UBX_DEFAULT_ADDRESS (0x42<<1)
 #define UBX_HEADER_LEN     6
@@ -133,7 +135,7 @@ class UbxGpsI2C {
 
     bool init(I2C * i2c_obj = nullptr);
     bool auto_send(UbxClassId class_id, char id, uint8_t rate = 1);
-    bool set_output_rate(uint16_t ms, uint16_t cycles = 1);
+    bool set_output_rate(chrono::milliseconds ms, uint16_t cycles = 1);
     bool set_odometer(bool enable, UbxOdoProfile profile, uint8_t velocity_filter = 0);
     bool reset_odometer();
 

@@ -22,7 +22,6 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 */
 
-#include "mbed.h"
 #include "UbxGpsI2C.h"
 
 UbxGpsI2C::UbxGpsI2C(EventQueue *queue, int8_t address):
@@ -45,7 +44,7 @@ UbxGpsI2C::UbxGpsI2C(PinName sda, PinName scl, EventQueue *queue, int8_t address
         (UBX_HEADER_LEN + sizeof(cfg_prt_t) + UBX_CHECKSUM_LEN) < sizeof(_buf),
         "Buffer size is too small");
 
-    ThisThread::sleep_for(100);
+    ThisThread::sleep_for(100ms);
 
     _i2c = new (_i2c_obj) I2C(sda, scl);
     _i2c->frequency(frequency);
@@ -132,7 +131,7 @@ bool UbxGpsI2C::poll(bool await) {
 
             if (_bytes_available == 0 || _bytes_available == USHRT_MAX) {
                 tr_debug("Data not yet ready, will wait");
-                ThisThread::sleep_for(MBED_CONF_UBXGPSI2C_REPEAT_DELAY);
+                ThisThread::sleep_for(chrono::milliseconds{MBED_CONF_UBXGPSI2C_REPEAT_DELAY});
 
             } else {
                 return get_data();
@@ -141,7 +140,7 @@ bool UbxGpsI2C::poll(bool await) {
     }
 
     return false;
-}
+};
 
 uint16_t UbxGpsI2C::packet_builder(UbxClassId class_id, char id, const char * payload, uint16_t payload_len) {
     if ((payload_len + UBX_HEADER_LEN + UBX_CHECKSUM_LEN) <= MBED_CONF_UBXGPSI2C_BUFFER_SIZE) {
@@ -541,9 +540,9 @@ bool UbxGpsI2C::auto_send(UbxClassId class_id, char id, uint8_t rate) {
     return false;
 }
 
-bool UbxGpsI2C::set_output_rate(uint16_t ms, uint16_t cycles) {
+bool UbxGpsI2C::set_output_rate(chrono::milliseconds ms, uint16_t cycles) {
     cfg_rate_t cfg_rate;
-    tr_info("Setting output rate: %lums", (uint32_t)ms * cycles);
+    tr_info("Setting output rate: %llims", chrono::duration_cast<chrono::milliseconds>(ms).count() * cycles);
 
     bool ok = send(UBX_CFG, UBX_CFG_RATE);
 
@@ -560,7 +559,7 @@ bool UbxGpsI2C::set_output_rate(uint16_t ms, uint16_t cycles) {
 
                 memcpy(&cfg_rate, data, sizeof(cfg_rate_t));
 
-                cfg_rate.measRate = ms;
+                cfg_rate.measRate = chrono::duration_cast<chrono::milliseconds>(ms).count();
                 cfg_rate.navRate = cycles;
                 cfg_rate.timeRef = 0;  // UTC
 
