@@ -29,7 +29,9 @@ SOFTWARE.
     #error "This library only supports I2C in async mode";
 #endif
 
+#include <chrono>
 #include "mbed.h"
+using namespace std::chrono;
 
 #include "mbed-trace/mbed_trace.h"
 #ifndef TRACE_GROUP
@@ -135,7 +137,7 @@ class UbxGpsI2C {
 
     bool init(I2C * i2c_obj = nullptr);
     bool auto_send(UbxClassId class_id, char id, uint8_t rate = 1);
-    bool set_output_rate(chrono::milliseconds ms, uint16_t cycles = 1);
+    bool set_output_rate(milliseconds ms, uint16_t cycles = 1);
     bool set_odometer(bool enable, UbxOdoProfile profile, uint8_t velocity_filter = 0);
     bool reset_odometer();
 

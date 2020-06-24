@@ -131,7 +131,7 @@ bool UbxGpsI2C::poll(bool await) {
 
             if (_bytes_available == 0 || _bytes_available == USHRT_MAX) {
                 tr_debug("Data not yet ready, will wait");
-                ThisThread::sleep_for(chrono::milliseconds{MBED_CONF_UBXGPSI2C_REPEAT_DELAY});
+                ThisThread::sleep_for(milliseconds{MBED_CONF_UBXGPSI2C_REPEAT_DELAY});
 
             } else {
                 return get_data();
@@ -540,9 +540,9 @@ bool UbxGpsI2C::auto_send(UbxClassId class_id, char id, uint8_t rate) {
     return false;
 }
 
-bool UbxGpsI2C::set_output_rate(chrono::milliseconds ms, uint16_t cycles) {
+bool UbxGpsI2C::set_output_rate(milliseconds ms, uint16_t cycles) {
     cfg_rate_t cfg_rate;
-    tr_info("Setting output rate: %llims", chrono::duration_cast<chrono::milliseconds>(ms).count() * cycles);
+    tr_info("Setting output rate: %llims", duration_cast<milliseconds>(ms).count() * cycles);
 
     bool ok = send(UBX_CFG, UBX_CFG_RATE);
 
@@ -559,7 +559,7 @@ bool UbxGpsI2C::set_output_rate(chrono::milliseconds ms, uint16_t cycles) {
 
                 memcpy(&cfg_rate, data, sizeof(cfg_rate_t));
 
-                cfg_rate.measRate = chrono::duration_cast<chrono::milliseconds>(ms).count();
+                cfg_rate.measRate = duration_cast<milliseconds>(ms).count();
                 cfg_rate.navRate = cycles;
                 cfg_rate.timeRef = 0;  // UTC
 
