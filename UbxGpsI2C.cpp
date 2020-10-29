@@ -51,7 +51,7 @@ UbxGpsI2C::UbxGpsI2C(PinName sda, PinName scl, EventQueue *queue, int8_t address
 }
 
 UbxGpsI2C::~UbxGpsI2C(void) {
-    if (_i2c == reinterpret_cast<I2C*>(_i2c_obj)) {
+    if (_i2c == reinterpret_cast<I2C *>(_i2c_obj)) {
         _i2c->~I2C();
     }
 
@@ -62,7 +62,7 @@ UbxGpsI2C::~UbxGpsI2C(void) {
     }
 }
 
-bool UbxGpsI2C::send(UbxClassId class_id, char id, const char * payload, uint16_t payload_len) {
+bool UbxGpsI2C::send(UbxClassId class_id, char id, const char *payload, uint16_t payload_len) {
     uint16_t len = packet_builder(class_id, id, payload, payload_len);
     tr_debug("Sending[%u]: %s", len, tr_array((uint8_t *)_buf, len));
 
@@ -84,7 +84,7 @@ bool UbxGpsI2C::send(UbxClassId class_id, char id, const char * payload, uint16_
     return false;
 }
 
-bool UbxGpsI2C::send_ack(UbxClassId class_id, char id, const char * payload, uint16_t payload_len) {
+bool UbxGpsI2C::send_ack(UbxClassId class_id, char id, const char *payload, uint16_t payload_len) {
     if (send(class_id, id, payload, payload_len)) {
         oob(UBX_ACK, UBX_ACK_ACK, callback(this, &UbxGpsI2C::ack_cb));
         _ack[0] = class_id;
@@ -142,7 +142,7 @@ bool UbxGpsI2C::poll(bool await) {
     return false;
 };
 
-uint16_t UbxGpsI2C::packet_builder(UbxClassId class_id, char id, const char * payload, uint16_t payload_len) {
+uint16_t UbxGpsI2C::packet_builder(UbxClassId class_id, char id, const char *payload, uint16_t payload_len) {
     if ((payload_len + UBX_HEADER_LEN + UBX_CHECKSUM_LEN) <= MBED_CONF_UBXGPSI2C_BUFFER_SIZE) {
         if (payload != nullptr && payload_len > 0) {
             if (payload == _buf) {  // we are reusing the same buffer so we will shift the payload
@@ -208,7 +208,7 @@ uint16_t UbxGpsI2C::bytes_available() {
     return USHRT_MAX;
 }
 
-uint16_t UbxGpsI2C::checksum(const char * packet, uint16_t len) {
+uint16_t UbxGpsI2C::checksum(const char *packet, uint16_t len) {
     uint8_t ca = 0;
     uint8_t cb = 0;
     uint16_t res = 0;
@@ -218,7 +218,7 @@ uint16_t UbxGpsI2C::checksum(const char * packet, uint16_t len) {
         cb += ca;
     }
 
-    res =  (cb << 8) | ca;
+    res = (cb << 8) | ca;
 
     return res;
 }
@@ -244,7 +244,7 @@ bool UbxGpsI2C::get_data() {
     return false;
 }
 
-uint16_t UbxGpsI2C::get_sync_index(const char* buf, uint16_t buf_size, char c, uint16_t offset) {
+uint16_t UbxGpsI2C::get_sync_index(const char *buf, uint16_t buf_size, char c, uint16_t offset) {
     uint16_t ret = USHRT_MAX;
 
     for (uint16_t i = offset; i < buf_size; i++) {
@@ -474,7 +474,7 @@ void UbxGpsI2C::cfg_cb() {
     _flags.set(UBX_FLAGS_CFG);
 }
 
-bool UbxGpsI2C::init(I2C * i2c_obj) {
+bool UbxGpsI2C::init(I2C *i2c_obj) {
     cfg_prt_t cfg_prt;
 
     if (i2c_obj != nullptr) {

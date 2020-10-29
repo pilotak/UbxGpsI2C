@@ -128,14 +128,14 @@ class UbxGpsI2C {
               uint32_t frequency = 400000);
     ~UbxGpsI2C(void);
 
-    bool send(UbxClassId class_id, char id, const char * payload = nullptr, uint16_t payload_len = 0);
-    bool send_ack(UbxClassId class_id, char id, const char * payload = nullptr, uint16_t payload_len = 0);
+    bool send(UbxClassId class_id, char id, const char *payload = nullptr, uint16_t payload_len = 0);
+    bool send_ack(UbxClassId class_id, char id, const char *payload = nullptr, uint16_t payload_len = 0);
     bool read();
 
     void oob(UbxClassId class_id, char id, Callback<void()> cb);
     void remove_oob(UbxClassId class_id, char id);
 
-    bool init(I2C * i2c_obj = nullptr);
+    bool init(I2C *i2c_obj = nullptr);
     bool auto_send(UbxClassId class_id, char id, uint8_t rate = 1);
     bool set_output_rate(milliseconds ms, uint16_t cycles = 1);
     bool set_odometer(bool enable, UbxOdoProfile profile, uint8_t velocity_filter = 0);
@@ -157,11 +157,11 @@ class UbxGpsI2C {
     EventFlags _flags;
 
     bool     poll(bool await = true);
-    uint16_t packet_builder(UbxClassId class_id, char id, const char * payload, uint16_t payload_len);
+    uint16_t packet_builder(UbxClassId class_id, char id, const char *payload, uint16_t payload_len);
     uint16_t bytes_available();
-    uint16_t checksum(const char * packet, uint16_t len);
+    uint16_t checksum(const char *packet, uint16_t len);
     bool     get_data();
-    uint16_t get_sync_index(const char* buf, uint16_t buf_size, char c, uint16_t offset = 0);
+    uint16_t get_sync_index(const char *buf, uint16_t buf_size, char c, uint16_t offset = 0);
     void     search_data();
 
     void     tx_cb(int event);
