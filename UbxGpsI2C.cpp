@@ -131,9 +131,12 @@ bool UbxGpsI2C::poll(bool await) {
         for (uint8_t i = 0; i < MBED_CONF_UBXGPSI2C_REPEAT_COUNT; i++) {
             _bytes_available = bytes_available();
 
-            if (_bytes_available == 0 || _bytes_available == USHRT_MAX) {
+            if (_bytes_available == 0) {
                 tr_debug("Data not yet ready, will wait");
                 ThisThread::sleep_for(milliseconds{MBED_CONF_UBXGPSI2C_REPEAT_DELAY});
+
+            } else if (_bytes_available == USHRT_MAX) {
+                return false;
 
             } else {
                 return get_data();
@@ -292,7 +295,7 @@ void UbxGpsI2C::search_data() {
 
                 } else {
                     tr_debug("UBX_SYNC_CHAR1 not found");
-                    _bytes_available -= _data_len;
+                    _bytes_available = 0;
                     _data_len = 0;
                     _packet_index = 0;
                     _packet_len = 0;
@@ -472,11 +475,23 @@ void UbxGpsI2C::cfg_cb() {
     if ((size_t)(_packet_len - UBX_HEADER_LEN - UBX_CHECKSUM_LEN) > sizeof(_buf)) {
         MBED_ERROR(MBED_MAKE_ERROR(MBED_MODULE_APPLICATION, MBED_ERROR_CODE_INVALID_SIZE),
                    "UBX CFG packet will not fit into buffer");
+        return;
     }
 
     memcpy(_buf, data + UBX_HEADER_LEN, _packet_len - UBX_HEADER_LEN - UBX_CHECKSUM_LEN);
 
     _flags.set(UBX_FLAGS_CFG);
+}
+
+void UbxGpsI2C::mon_cb() {
+    for (auto i = UBX_HEADER_LEN + 40; i < _packet_len; i = i + 30) {
+        if (data[i] == 'P' && data[i + 1] == 'R') {
+            _buf[0] = (data[i + 8] - '0') * 10 + (data[i + 9] - '0');
+            _buf[1] = (data[i + 11] - '0') * 10 + (data[i + 12] - '0');
+
+            _flags.set(UBX_FLAGS_MON);
+        }
+    }
 }
 
 bool UbxGpsI2C::init(I2C *i2c_obj) {
@@ -549,6 +564,11 @@ bool UbxGpsI2C::auto_send(UbxClassId class_id, char id, uint8_t rate) {
 bool UbxGpsI2C::set_output_rate(milliseconds ms, uint16_t cycles) {
     cfg_rate_t cfg_rate;
     tr_info("Setting output rate: %llims", duration_cast<milliseconds>(ms).count() * cycles);
+
+    if (ms < 50ms || cycles > 127) {
+        tr_error("Wrong parameter");
+        return false;
+    }
 
     bool ok = send(UBX_CFG, UBX_CFG_RATE);
 
@@ -667,7 +687,7 @@ bool UbxGpsI2C::set_power_mode(PowerModeValue mode, uint16_t period, uint16_t on
 
         if (poll()) {
             tr_debug("Waiting for CFG PMS packet");
-            uint32_t cfg = _flags.wait_all(UBX_FLAGS_CFG | UBX_FLAGS_SEARCH_DONE, MBED_CONF_UBXGPSI2C_TIMEOUT, false);
+            uint32_t cfg = _flags.wait_all(UBX_FLAGS_CFG | UBX_FLAGS_SEARCH_DONE, MBED_CONF_UBXGPSI2C_TIMEOUT);
 
             if (!(cfg & UBX_FLAGS_ERROR)) {
                 tr_debug("CFG PMS packet received");
@@ -697,6 +717,43 @@ bool UbxGpsI2C::set_power_mode(PowerModeValue mode, uint16_t period, uint16_t on
         }
 
         remove_oob(UBX_CFG, UBX_CFG_PMS);
+    }
+
+    return ok;
+}
+
+bool UbxGpsI2C::get_protocol_version(char *version) {
+    tr_debug("Getting protocol version");
+
+    bool ok = send(UBX_MON, UBX_MON_VER);
+
+    if (ok) {
+        // register our packet before polling
+        oob(UBX_MON, UBX_MON_VER, callback(this, &UbxGpsI2C::mon_cb));
+
+        if (poll()) {
+            tr_debug("Waiting for MON VER packet");
+            uint32_t cfg = _flags.wait_all(UBX_FLAGS_MON | UBX_FLAGS_SEARCH_DONE, MBED_CONF_UBXGPSI2C_TIMEOUT);
+
+            if (!(cfg & UBX_FLAGS_ERROR)) {
+                tr_info("Protocol version: %i.%i", _buf[0], _buf[1]);
+
+                if (version) {
+                    memcpy(version, _buf, 2);
+                }
+
+                ok = true;
+
+            } else {
+                tr_error("MON VER timeout");
+                ok = false;
+            }
+
+        } else {
+            ok = false;
+        }
+
+        remove_oob(UBX_MON, UBX_MON_VER);
     }
 
     return ok;

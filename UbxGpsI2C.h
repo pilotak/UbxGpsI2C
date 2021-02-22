@@ -47,6 +47,7 @@ using namespace std::chrono;
 #define UBX_FLAGS_CFG           (1 << 2)
 #define UBX_FLAGS_ACK_DONE      (1 << 3)
 #define UBX_FLAGS_NAK           (1 << 4)
+#define UBX_FLAGS_MON           (1 << 5)
 #define UBX_FLAGS_ERROR         (1 << 31)
 
 #define UBX_SYNC_CHAR1 0xB5
@@ -63,10 +64,11 @@ using namespace std::chrono;
 #define UBX_ACK_NAK  0x00
 #define UBX_ACK_ACK  0x01
 
+#define UBX_NAV_PVT      0x07
 #define UBX_NAV_ODO      0x09
 #define UBX_NAV_RESETODO 0x10
 
-#define UBX_NAV_PVT 0x07
+#define UBX_MON_VER 0x04
 
 class UbxGpsI2C {
   public:
@@ -162,6 +164,7 @@ class UbxGpsI2C {
     bool set_output_rate(milliseconds ms, uint16_t cycles = 1);
     bool set_odometer(bool enable, UbxOdoProfile profile, uint8_t velocity_filter = 0);
     bool set_power_mode(PowerModeValue mode, uint16_t period = 0, uint16_t on_time = 0);
+    bool get_protocol_version(char *version);
     bool reset_odometer();
 
     char data[MBED_CONF_UBXGPSI2C_DATA_SIZE] = {0};
@@ -191,6 +194,7 @@ class UbxGpsI2C {
     void     rx_cb(int event);
     void     ack_cb();
     void     cfg_cb();
+    void     mon_cb();
 
     char         _ack[2] = {0};
     char         _buf[MBED_CONF_UBXGPSI2C_BUFFER_SIZE] = {0};
