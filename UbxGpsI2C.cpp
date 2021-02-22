@@ -405,6 +405,32 @@ END:
     }
 }
 
+bool UbxGpsI2C::get_cfg(char id) {
+    bool ok = send(UBX_CFG, id);
+
+    if (ok) {
+        // register our packet before polling
+        oob(UBX_CFG, id, callback(this, &UbxGpsI2C::cfg_cb));
+
+        if (poll()) {
+            tr_debug("Waiting for CFG packet");
+            uint32_t cfg = _flags.wait_all(UBX_FLAGS_CFG | UBX_FLAGS_SEARCH_DONE, MBED_CONF_UBXGPSI2C_TIMEOUT);
+
+            if (cfg & UBX_FLAGS_ERROR) {
+                tr_error("CFG timeout");
+                ok = false;
+            }
+        }
+
+        remove_oob(UBX_CFG, id);
+
+    } else {
+        ok = false;
+    }
+
+    return ok;
+}
+
 void UbxGpsI2C::oob(UbxClassId class_id, char id, Callback<void()> cb) {
     // In case we have it already in, remove it
     remove_oob(class_id, id);
@@ -570,44 +596,25 @@ bool UbxGpsI2C::set_output_rate(milliseconds ms, uint16_t cycles) {
         return false;
     }
 
-    bool ok = send(UBX_CFG, UBX_CFG_RATE);
+    bool ok = get_cfg(UBX_CFG_RATE);
 
     if (ok) {
-        // register our packet before polling
-        oob(UBX_CFG, UBX_CFG_RATE, callback(this, &UbxGpsI2C::cfg_cb));
+        tr_debug("CFG-RATE packet received");
 
-        if (poll()) {
-            tr_debug("Waiting for CFG RATE packet");
-            uint32_t cfg = _flags.wait_all(UBX_FLAGS_CFG | UBX_FLAGS_SEARCH_DONE, MBED_CONF_UBXGPSI2C_TIMEOUT);
+        memcpy(&cfg_rate, _buf, sizeof(cfg_rate_t)); // _buf contains only payload
 
-            if (!(cfg & UBX_FLAGS_ERROR)) {
-                tr_debug("CFG RATE packet received");
+        cfg_rate.measRate = duration_cast<milliseconds>(ms).count();
+        cfg_rate.navRate = cycles;
+        cfg_rate.timeRef = 0;  // UTC
 
-                memcpy(&cfg_rate, _buf, sizeof(cfg_rate_t)); // _buf contains only payload
+        memcpy(_buf, &cfg_rate, sizeof(cfg_rate_t));
 
-                cfg_rate.measRate = duration_cast<milliseconds>(ms).count();
-                cfg_rate.navRate = cycles;
-                cfg_rate.timeRef = 0;  // UTC
-
-                memcpy(_buf, &cfg_rate, sizeof(cfg_rate_t));
-
-                if (send_ack(UBX_CFG, UBX_CFG_RATE, _buf, sizeof(cfg_rate_t))) {
-                    tr_info("New output rate: %llims", duration_cast<milliseconds>(ms).count() * cycles);
-
-                } else {
-                    ok = false;
-                }
-
-            } else {
-                tr_error("CFG RATE timeout");
-                ok = false;
-            }
+        if (send_ack(UBX_CFG, UBX_CFG_RATE, _buf, sizeof(cfg_rate_t))) {
+            tr_info("New output rate: %llims", duration_cast<milliseconds>(ms).count() * cycles);
 
         } else {
             ok = false;
         }
-
-        remove_oob(UBX_CFG, UBX_CFG_RATE);
     }
 
     return ok;
@@ -617,59 +624,40 @@ bool UbxGpsI2C::set_odometer(bool enable, UbxOdoProfile profile, uint8_t velocit
     odometer_t odo;
     tr_debug("Setting odometer");
 
-    bool ok = send(UBX_CFG, UBX_CFG_ODO);
+    bool ok = get_cfg(UBX_CFG_ODO);
 
     if (ok) {
-        // register our packet before polling
-        oob(UBX_CFG, UBX_CFG_ODO, callback(this, &UbxGpsI2C::cfg_cb));
+        tr_debug("CFG-ODO packet received");
 
-        if (poll()) {
-            tr_debug("Waiting for CFG ODO packet");
-            uint32_t cfg = _flags.wait_all(UBX_FLAGS_CFG | UBX_FLAGS_SEARCH_DONE, MBED_CONF_UBXGPSI2C_TIMEOUT);
+        memcpy(&odo, _buf, sizeof(odometer_t)); // _buf contains only payload
 
-            if (!(cfg & UBX_FLAGS_ERROR)) {
-                tr_debug("CFG ODO packet received");
+        odo.odoCfg &= ~0b111;
+        odo.odoCfg |= (uint8_t)profile;
 
-                memcpy(&odo, _buf, sizeof(odometer_t)); // _buf contains only payload
+        if (velocity_filter > 0) {
+            odo.flags |= 0b100;
 
-                odo.odoCfg &= ~0b111;
-                odo.odoCfg |= (uint8_t)profile;
+        } else {
+            odo.flags &= ~0b100;
+        }
 
-                if (velocity_filter > 0) {
-                    odo.flags |= 0b100;
+        odo.velLpGain = velocity_filter;
 
-                } else {
-                    odo.flags &= ~0b100;
-                }
+        if (enable) {
+            odo.flags |= 0b1;
 
-                odo.velLpGain = velocity_filter;
+        } else {
+            odo.flags &= ~0b1;
+        }
 
-                if (enable) {
-                    odo.flags |= 0b1;
+        memcpy(_buf, &odo, sizeof(odometer_t));
 
-                } else {
-                    odo.flags &= ~0b1;
-                }
-
-                memcpy(_buf, &odo, sizeof(odometer_t));
-
-                if (send_ack(UBX_CFG, UBX_CFG_ODO, _buf, sizeof(odometer_t))) {
-                    tr_info("Odometer %s", enable ? "enabled" : "disabled");
-
-                } else {
-                    ok = false;
-                }
-
-            } else {
-                tr_error("CFG ODO timeout");
-                ok = false;
-            }
+        if (send_ack(UBX_CFG, UBX_CFG_ODO, _buf, sizeof(odometer_t))) {
+            tr_info("Odometer %s", enable ? "enabled" : "disabled");
 
         } else {
             ok = false;
         }
-
-        remove_oob(UBX_CFG, UBX_CFG_ODO);
     }
 
     return ok;
@@ -679,44 +667,51 @@ bool UbxGpsI2C::set_power_mode(PowerModeValue mode, uint16_t period, uint16_t on
     cfg_pms_t cfg_pms;
     tr_debug("Setting power mode");
 
-    bool ok = send(UBX_CFG, UBX_CFG_PMS);
+    bool ok = get_cfg(UBX_CFG_PMS);
 
     if (ok) {
-        // register our packet before polling
-        oob(UBX_CFG, UBX_CFG_PMS, callback(this, &UbxGpsI2C::cfg_cb));
+        tr_debug("CFG-PMS packet received");
 
-        if (poll()) {
-            tr_debug("Waiting for CFG PMS packet");
-            uint32_t cfg = _flags.wait_all(UBX_FLAGS_CFG | UBX_FLAGS_SEARCH_DONE, MBED_CONF_UBXGPSI2C_TIMEOUT);
+        memcpy(&cfg_pms, _buf, sizeof(cfg_pms_t)); // _buf contains only payload
 
-            if (!(cfg & UBX_FLAGS_ERROR)) {
-                tr_debug("CFG PMS packet received");
+        cfg_pms.powerSetupValue = (uint8_t)mode;
+        cfg_pms.period = (mode == PSV_INTERVAL) ? period : 0;
+        cfg_pms.onTime = (mode == PSV_INTERVAL) ? on_time : 0;
 
-                memcpy(&cfg_pms, _buf, sizeof(cfg_pms_t)); // _buf contains only payload
+        memcpy(_buf, &cfg_pms, sizeof(cfg_pms_t));
 
-                cfg_pms.powerSetupValue = (uint8_t)mode;
-                cfg_pms.period = (mode == PSV_INTERVAL) ? period : 0;
-                cfg_pms.onTime = (mode == PSV_INTERVAL) ? on_time : 0;
-
-                memcpy(_buf, &cfg_pms, sizeof(cfg_pms_t));
-
-                if (send_ack(UBX_CFG, UBX_CFG_PMS, _buf, sizeof(cfg_pms_t))) {
-                    tr_info("New power mode: %u", mode);
-
-                } else {
-                    ok = false;
-                }
-
-            } else {
-                tr_error("CFG PMS timeout");
-                ok = false;
-            }
+        if (send_ack(UBX_CFG, UBX_CFG_PMS, _buf, sizeof(cfg_pms_t))) {
+            tr_info("New power mode: %u", mode);
 
         } else {
             ok = false;
         }
+    }
 
-        remove_oob(UBX_CFG, UBX_CFG_PMS);
+    return ok;
+}
+
+bool UbxGpsI2C::set_low_power(bool low_power) {
+    cfg_rxm_t cfg_rxm;
+    tr_debug("Setting low power");
+
+    bool ok = get_cfg(UBX_CFG_RXM);
+
+    if (ok) {
+        tr_debug("CFG-RXM received");
+
+        memcpy(&cfg_rxm, _buf, sizeof(cfg_rxm_t)); // _buf contains only payload
+
+        cfg_rxm.lpMode = low_power;
+
+        memcpy(_buf, &cfg_rxm, sizeof(cfg_rxm_t));
+
+        if (send_ack(UBX_CFG, UBX_CFG_RXM, _buf, sizeof(cfg_rxm_t))) {
+            tr_info("Low power: %u", low_power);
+
+        } else {
+            ok = false;
+        }
     }
 
     return ok;

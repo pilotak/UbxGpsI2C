@@ -65,6 +65,7 @@ using namespace std::chrono;
 #define UBX_CFG_RST  0x04
 #define UBX_CFG_RATE 0x08
 #define UBX_CFG_CFG  0x09
+#define UBX_CFG_RXM  0x11
 #define UBX_CFG_ODO  0x1E
 #define UBX_CFG_PMS  0x86
 
@@ -119,6 +120,11 @@ class UbxGpsI2C {
         uint8_t reserved4[2];
     };
 
+    struct cfg_rxm_t {
+        uint8_t reserved;
+        uint8_t lpMode;
+    };
+
     typedef enum {
         UBX_NAV = 0x01,
         UBX_RXM = 0x02,
@@ -171,6 +177,7 @@ class UbxGpsI2C {
     bool set_output_rate(milliseconds ms, uint16_t cycles = 1);
     bool set_odometer(bool enable, UbxOdoProfile profile, uint8_t velocity_filter = 0);
     bool set_power_mode(PowerModeValue mode, uint16_t period = 0, uint16_t on_time = 0);
+    bool set_low_power(bool low_power);
     bool get_protocol_version(char *version);
     bool reset_odometer();
 
@@ -196,6 +203,7 @@ class UbxGpsI2C {
     bool     get_data();
     uint16_t get_sync_index(const char *buf, uint16_t buf_size, char c, uint16_t offset = 0);
     void     search_data();
+    bool     get_cfg(char id);
 
     void     tx_cb(int event);
     void     rx_cb(int event);

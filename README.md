@@ -241,7 +241,8 @@ int main() {
     },
     "target_overrides": {
         "*": {
-            "mbed-trace.enable": true
+            "mbed-trace.enable": true,
+            "ubxgpsi2c.debug": true
         }
     }
 }
