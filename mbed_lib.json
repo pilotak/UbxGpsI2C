@@ -1,6 +1,10 @@
 {
   "name": "ubxgpsi2c",
   "config": {
+    "debug": {
+      "help": "Enable/disable debug",
+      "value": null
+    },
     "data-size": {
       "help": "Max size of RX buffer",
       "value": 256,
@@ -13,7 +17,7 @@
     },
     "repeat-count": {
       "help": "How many tries to request available data",
-      "value": 5,
+      "value": 4,
       "required": true
     },
     "repeat-delay": {
@@ -23,7 +27,7 @@
     },
     "timeout": {
       "help": "Timeout for async calls (ms)",
-      "value": 200,
+      "value": 500,
       "required": true
     }
   }
