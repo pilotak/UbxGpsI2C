@@ -136,7 +136,8 @@ bool UbxGpsI2C::poll(bool await) {
                 ThisThread::sleep_for(milliseconds{MBED_CONF_UBXGPSI2C_REPEAT_DELAY});
 
             } else if (_bytes_available == USHRT_MAX) {
-                return false;
+                tr_error("Invalid");
+                break;
 
             } else {
                 return get_data();
@@ -233,7 +234,7 @@ bool UbxGpsI2C::get_data() {
                    MBED_CONF_UBXGPSI2C_DATA_SIZE :
                    (_bytes_available - _data_len);
 
-    if (_i2c->transfer(
+    if (len > 0 && _i2c->transfer(
                 _i2c_addr,
                 nullptr,
                 0,
@@ -547,14 +548,13 @@ bool UbxGpsI2C::init(I2C *i2c_obj) {
 }
 
 bool UbxGpsI2C::auto_send(UbxClassId class_id, char id, uint8_t rate) {
-    tr_info("Request to autosend CLASS: %02hhX, ID: %02hhX, rate: %u", class_id, id, rate);
+    tr_debug("Autosend request");
     _buf[0] = class_id;
     _buf[1] = id;
     _buf[2] = rate;
 
     if (send_ack(UBX_CFG, UBX_CFG_MSG, _buf, sizeof(cfg_prt_t))) {
-        tr_info("Request OK");
-
+        tr_info("Autosend OK, class: %02hhX, id: %02hhX, rate: %u", class_id, id, rate);
         return true;
     }
 
@@ -563,7 +563,7 @@ bool UbxGpsI2C::auto_send(UbxClassId class_id, char id, uint8_t rate) {
 
 bool UbxGpsI2C::set_output_rate(milliseconds ms, uint16_t cycles) {
     cfg_rate_t cfg_rate;
-    tr_info("Setting output rate: %llims", duration_cast<milliseconds>(ms).count() * cycles);
+    tr_debug("Setting output rate");
 
     if (ms < 50ms || cycles > 127) {
         tr_error("Wrong parameter");
@@ -592,7 +592,7 @@ bool UbxGpsI2C::set_output_rate(milliseconds ms, uint16_t cycles) {
                 memcpy(_buf, &cfg_rate, sizeof(cfg_rate_t));
 
                 if (send_ack(UBX_CFG, UBX_CFG_RATE, _buf, sizeof(cfg_rate_t))) {
-                    tr_info("Output rate set");
+                    tr_info("New output rate: %llims", duration_cast<milliseconds>(ms).count() * cycles);
 
                 } else {
                     ok = false;
@@ -615,7 +615,7 @@ bool UbxGpsI2C::set_output_rate(milliseconds ms, uint16_t cycles) {
 
 bool UbxGpsI2C::set_odometer(bool enable, UbxOdoProfile profile, uint8_t velocity_filter) {
     odometer_t odo;
-    tr_info("%s odometer", enable ? "Setting up" : "Disabling");
+    tr_debug("Setting odometer");
 
     bool ok = send(UBX_CFG, UBX_CFG_ODO);
 
@@ -654,7 +654,7 @@ bool UbxGpsI2C::set_odometer(bool enable, UbxOdoProfile profile, uint8_t velocit
                 memcpy(_buf, &odo, sizeof(odometer_t));
 
                 if (send_ack(UBX_CFG, UBX_CFG_ODO, _buf, sizeof(odometer_t))) {
-                    tr_info("Odometer set");
+                    tr_info("Odometer %s", enable ? "enabled" : "disabled");
 
                 } else {
                     ok = false;
@@ -677,7 +677,7 @@ bool UbxGpsI2C::set_odometer(bool enable, UbxOdoProfile profile, uint8_t velocit
 
 bool UbxGpsI2C::set_power_mode(PowerModeValue mode, uint16_t period, uint16_t on_time) {
     cfg_pms_t cfg_pms;
-    tr_info("Setting power mode: %u, period: %u, on_time: %u", mode, period, on_time);
+    tr_debug("Setting power mode");
 
     bool ok = send(UBX_CFG, UBX_CFG_PMS);
 
@@ -701,7 +701,7 @@ bool UbxGpsI2C::set_power_mode(PowerModeValue mode, uint16_t period, uint16_t on
                 memcpy(_buf, &cfg_pms, sizeof(cfg_pms_t));
 
                 if (send_ack(UBX_CFG, UBX_CFG_PMS, _buf, sizeof(cfg_pms_t))) {
-                    tr_info("Power mode set");
+                    tr_info("New power mode: %u", mode);
 
                 } else {
                     ok = false;
@@ -742,8 +742,6 @@ bool UbxGpsI2C::get_protocol_version(char *version) {
                     memcpy(version, _buf, 2);
                 }
 
-                ok = true;
-
             } else {
                 tr_error("MON VER timeout");
                 ok = false;
@@ -760,10 +758,10 @@ bool UbxGpsI2C::get_protocol_version(char *version) {
 }
 
 bool UbxGpsI2C::reset_odometer() {
-    tr_info("Resetting odometer");
+    tr_debug("Resetting odometer");
 
     if (send_ack(UBX_NAV, UBX_NAV_RESETODO)) {
-        tr_info("Reset OK");
+        tr_info("Odometer reset OK");
 
         return true;
     }

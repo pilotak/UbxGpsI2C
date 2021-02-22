@@ -38,6 +38,13 @@ using namespace std::chrono;
     #define TRACE_GROUP  "UBX "
 #endif
 
+#if !defined(MBED_CONF_UBXGPSI2C_DEBUG)
+    #define tr_error(...) {}
+    #define tr_warning(...) {}
+    #define tr_info(...) {}
+    #define tr_debug(...) {}
+#endif
+
 #define UBX_DEFAULT_ADDRESS (0x42<<1)
 #define UBX_HEADER_LEN     6
 #define UBX_CHECKSUM_LEN   2
