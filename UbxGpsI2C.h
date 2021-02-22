@@ -45,7 +45,9 @@ using namespace std::chrono;
 #define UBX_FLAGS_TRANSFER_DONE (1 << 0)
 #define UBX_FLAGS_SEARCH_DONE   (1 << 1)
 #define UBX_FLAGS_CFG           (1 << 2)
-#define UBX_FLAGS_ACK           (1 << 3)
+#define UBX_FLAGS_ACK_DONE      (1 << 3)
+#define UBX_FLAGS_NAK           (1 << 4)
+#define UBX_FLAGS_ERROR         (1 << 31)
 
 #define UBX_SYNC_CHAR1 0xB5
 #define UBX_SYNC_CHAR2 0x62
@@ -56,7 +58,9 @@ using namespace std::chrono;
 #define UBX_CFG_RATE 0x08
 #define UBX_CFG_CFG  0x09
 #define UBX_CFG_ODO  0x1E
+#define UBX_CFG_PMS  0x86
 
+#define UBX_ACK_NAK  0x00
 #define UBX_ACK_ACK  0x01
 
 #define UBX_NAV_ODO      0x09
@@ -82,6 +86,14 @@ class UbxGpsI2C {
         uint16_t measRate;
         uint16_t navRate;
         uint16_t timeRef;
+    };
+
+    struct cfg_pms_t {
+        uint8_t version;
+        uint8_t powerSetupValue;
+        uint16_t period;
+        uint16_t onTime;
+        uint8_t reserved[2];
     };
 
     struct odometer_t {
@@ -123,6 +135,16 @@ class UbxGpsI2C {
         ODO_CUSTOM
     } UbxOdoProfile;
 
+    typedef enum {
+        PSV_FULL_POWER = 0, // No compromises on power saves
+        PSV_BALANCED, // Power savings without performance degradation
+        PSV_INTERVAL, // ON OFF mode setup
+        PSV_AGGRESSIVE_1HZ, // Strong power saving setup
+        PSV_AGGRESSIVE_2HZ, // Excellent power saving setup
+        PSV_AGGRESSIVE_4HZ, // Good power saving setup
+        PSV_INVALID = 0xFF,
+    } PowerModeValue;
+
     UbxGpsI2C(EventQueue *queue, int8_t address = UBX_DEFAULT_ADDRESS);
     UbxGpsI2C(PinName sda, PinName scl, EventQueue *queue, int8_t address = UBX_DEFAULT_ADDRESS,
               uint32_t frequency = 400000);
@@ -139,6 +161,7 @@ class UbxGpsI2C {
     bool auto_send(UbxClassId class_id, char id, uint8_t rate = 1);
     bool set_output_rate(milliseconds ms, uint16_t cycles = 1);
     bool set_odometer(bool enable, UbxOdoProfile profile, uint8_t velocity_filter = 0);
+    bool set_power_mode(PowerModeValue mode, uint16_t period = 0, uint16_t on_time = 0);
     bool reset_odometer();
 
     char data[MBED_CONF_UBXGPSI2C_DATA_SIZE] = {0};

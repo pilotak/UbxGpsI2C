@@ -85,6 +85,8 @@ bool UbxGpsI2C::send(UbxClassId class_id, char id, const char *payload, uint16_t
 }
 
 bool UbxGpsI2C::send_ack(UbxClassId class_id, char id, const char *payload, uint16_t payload_len) {
+    bool ok = false;
+
     if (send(class_id, id, payload, payload_len)) {
         oob(UBX_ACK, UBX_ACK_ACK, callback(this, &UbxGpsI2C::ack_cb));
         _ack[0] = class_id;
@@ -92,20 +94,20 @@ bool UbxGpsI2C::send_ack(UbxClassId class_id, char id, const char *payload, uint
 
         if (poll()) {
             tr_debug("Waiting for UBX ACK");
-            uint32_t ack = _flags.wait_all(UBX_FLAGS_ACK | UBX_FLAGS_SEARCH_DONE, MBED_CONF_UBXGPSI2C_TIMEOUT);
+            uint32_t ack = _flags.wait_all(UBX_FLAGS_ACK_DONE | UBX_FLAGS_SEARCH_DONE, MBED_CONF_UBXGPSI2C_TIMEOUT);
 
-            if (ack == (UBX_FLAGS_ACK | UBX_FLAGS_SEARCH_DONE)) {
-                tr_debug("UBX ACK received");
-                return true;
+            if (!(ack & UBX_FLAGS_ERROR)) {
+                ok = ack & UBX_FLAGS_NAK ? false : true;
 
             } else {
                 tr_error("UBX ACK timeout");
-                remove_oob(UBX_ACK, UBX_ACK_ACK);
             }
         }
+
+        remove_oob(UBX_ACK, UBX_ACK_ACK);
     }
 
-    return false;
+    return ok;
 }
 
 bool UbxGpsI2C::read() {
@@ -203,7 +205,7 @@ uint16_t UbxGpsI2C::bytes_available() {
         }
     }
 
-    tr_error("No ACK from GPS");
+    tr_error("No I2C ACK from GPS");
 
     return USHRT_MAX;
 }
@@ -312,7 +314,7 @@ void UbxGpsI2C::search_data() {
                 bool process = false;
 
                 for (struct oob_t *oob = _oobs; oob; oob = oob->next) {
-                    if (oob->class_id == data[2] && oob->id == data[3]) {
+                    if (oob->class_id == UBX_ACK || (oob->class_id == data[2] && oob->id == data[3])) {
                         tr_debug("This is a packet we are looking for");
                         process = true;
                         break;
@@ -353,7 +355,7 @@ void UbxGpsI2C::search_data() {
                     tr_debug("Checksum OK");
 
                     for (struct oob_t *oob = _oobs; oob; oob = oob->next) {
-                        if (oob->class_id == data[2] && oob->id == data[3]) {
+                        if (oob->class_id == UBX_ACK || (oob->class_id == data[2] && oob->id == data[3])) {
                             oob->cb.call();
                             break;
                         }
@@ -450,9 +452,14 @@ void UbxGpsI2C::tx_cb(int event) {  // ISR
 
 void UbxGpsI2C::ack_cb() {
     if (_ack[0] == data[6] && _ack[1] == data[7]) {  // compare ACK class & id
-        tr_debug("Got requested UBX ACK class: %02X, id: %02X", data[6], data[7]);
-        remove_oob(UBX_ACK, UBX_ACK_ACK);
-        _flags.set(UBX_FLAGS_ACK);
+        tr_debug("Got ACK: %u for class: %02X, id: %02X", data[3], data[6], data[7]);
+
+        if (data[3] == UBX_ACK_NAK) {
+            _flags.set(UBX_FLAGS_NAK);
+            tr_error("ACK failed");
+        }
+
+        _flags.set(UBX_FLAGS_ACK_DONE);
 
     } else {
         tr_debug("Different UBX ACK class");
@@ -468,8 +475,6 @@ void UbxGpsI2C::cfg_cb() {
     }
 
     memcpy(_buf, data + UBX_HEADER_LEN, _packet_len - UBX_HEADER_LEN - UBX_CHECKSUM_LEN);
-
-    remove_oob(UBX_CFG, UBX_CFG_PRT);
 
     _flags.set(UBX_FLAGS_CFG);
 }
@@ -495,7 +500,7 @@ bool UbxGpsI2C::init(I2C *i2c_obj) {
 
             uint32_t cfg = _flags.wait_all(UBX_FLAGS_CFG | UBX_FLAGS_SEARCH_DONE, MBED_CONF_UBXGPSI2C_TIMEOUT);
 
-            if (cfg == (UBX_FLAGS_CFG | UBX_FLAGS_SEARCH_DONE)) {
+            if (!(cfg & UBX_FLAGS_ERROR)) {
                 tr_debug("UBX CFG packet received");
 
                 memcpy(&cfg_prt, _buf, sizeof(cfg_prt_t));  // _buf contains only payload
@@ -513,13 +518,14 @@ bool UbxGpsI2C::init(I2C *i2c_obj) {
 
             } else {
                 tr_error("UBX CFG timeout");
-                remove_oob(UBX_CFG, UBX_CFG_PRT);
                 ok = false;
             }
 
         } else {
             ok = false;
         }
+
+        remove_oob(UBX_CFG, UBX_CFG_PRT);
     }
 
     return ok;
@@ -554,10 +560,10 @@ bool UbxGpsI2C::set_output_rate(milliseconds ms, uint16_t cycles) {
             tr_debug("Waiting for CFG RATE packet");
             uint32_t cfg = _flags.wait_all(UBX_FLAGS_CFG | UBX_FLAGS_SEARCH_DONE, MBED_CONF_UBXGPSI2C_TIMEOUT);
 
-            if (cfg == (UBX_FLAGS_CFG | UBX_FLAGS_SEARCH_DONE)) {
+            if (!(cfg & UBX_FLAGS_ERROR)) {
                 tr_debug("CFG RATE packet received");
 
-                memcpy(&cfg_rate, data, sizeof(cfg_rate_t));
+                memcpy(&cfg_rate, _buf, sizeof(cfg_rate_t)); // _buf contains only payload
 
                 cfg_rate.measRate = duration_cast<milliseconds>(ms).count();
                 cfg_rate.navRate = cycles;
@@ -574,13 +580,14 @@ bool UbxGpsI2C::set_output_rate(milliseconds ms, uint16_t cycles) {
 
             } else {
                 tr_error("CFG RATE timeout");
-                remove_oob(UBX_CFG, UBX_CFG_RATE);
                 ok = false;
             }
 
         } else {
             ok = false;
         }
+
+        remove_oob(UBX_CFG, UBX_CFG_RATE);
     }
 
     return ok;
@@ -600,10 +607,10 @@ bool UbxGpsI2C::set_odometer(bool enable, UbxOdoProfile profile, uint8_t velocit
             tr_debug("Waiting for CFG ODO packet");
             uint32_t cfg = _flags.wait_all(UBX_FLAGS_CFG | UBX_FLAGS_SEARCH_DONE, MBED_CONF_UBXGPSI2C_TIMEOUT);
 
-            if (cfg == (UBX_FLAGS_CFG | UBX_FLAGS_SEARCH_DONE)) {
+            if (!(cfg & UBX_FLAGS_ERROR)) {
                 tr_debug("CFG ODO packet received");
 
-                memcpy(&odo, data + UBX_HEADER_LEN, sizeof(odometer_t));
+                memcpy(&odo, _buf, sizeof(odometer_t)); // _buf contains only payload
 
                 odo.odoCfg &= ~0b111;
                 odo.odoCfg |= (uint8_t)profile;
@@ -635,13 +642,61 @@ bool UbxGpsI2C::set_odometer(bool enable, UbxOdoProfile profile, uint8_t velocit
 
             } else {
                 tr_error("CFG ODO timeout");
-                remove_oob(UBX_CFG, UBX_CFG_ODO);
                 ok = false;
             }
 
         } else {
             ok = false;
         }
+
+        remove_oob(UBX_CFG, UBX_CFG_ODO);
+    }
+
+    return ok;
+}
+
+bool UbxGpsI2C::set_power_mode(PowerModeValue mode, uint16_t period, uint16_t on_time) {
+    cfg_pms_t cfg_pms;
+    tr_info("Setting power mode: %u, period: %u, on_time: %u", mode, period, on_time);
+
+    bool ok = send(UBX_CFG, UBX_CFG_PMS);
+
+    if (ok) {
+        // register our packet before polling
+        oob(UBX_CFG, UBX_CFG_PMS, callback(this, &UbxGpsI2C::cfg_cb));
+
+        if (poll()) {
+            tr_debug("Waiting for CFG PMS packet");
+            uint32_t cfg = _flags.wait_all(UBX_FLAGS_CFG | UBX_FLAGS_SEARCH_DONE, MBED_CONF_UBXGPSI2C_TIMEOUT, false);
+
+            if (!(cfg & UBX_FLAGS_ERROR)) {
+                tr_debug("CFG PMS packet received");
+
+                memcpy(&cfg_pms, _buf, sizeof(cfg_pms_t)); // _buf contains only payload
+
+                cfg_pms.powerSetupValue = (uint8_t)mode;
+                cfg_pms.period = (mode == PSV_INTERVAL) ? period : 0;
+                cfg_pms.onTime = (mode == PSV_INTERVAL) ? on_time : 0;
+
+                memcpy(_buf, &cfg_pms, sizeof(cfg_pms_t));
+
+                if (send_ack(UBX_CFG, UBX_CFG_PMS, _buf, sizeof(cfg_pms_t))) {
+                    tr_info("Power mode set");
+
+                } else {
+                    ok = false;
+                }
+
+            } else {
+                tr_error("CFG PMS timeout");
+                ok = false;
+            }
+
+        } else {
+            ok = false;
+        }
+
+        remove_oob(UBX_CFG, UBX_CFG_PMS);
     }
 
     return ok;
