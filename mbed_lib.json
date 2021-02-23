@@ -27,7 +27,12 @@
     },
     "timeout": {
       "help": "Timeout for async calls (ms)",
-      "value": 500,
+      "value": 200,
+      "required": true
+    },
+    "ack-timeout": {
+      "help": "Timeout for async calls (ms)",
+      "value": 800,
       "required": true
     }
   }

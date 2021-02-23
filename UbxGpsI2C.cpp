@@ -94,7 +94,7 @@ bool UbxGpsI2C::send_ack(UbxClassId class_id, char id, const char *payload, uint
 
         if (poll()) {
             tr_debug("Waiting for UBX ACK");
-            uint32_t ack = _flags.wait_all(UBX_FLAGS_ACK_DONE, MBED_CONF_UBXGPSI2C_TIMEOUT);
+            uint32_t ack = _flags.wait_all(UBX_FLAGS_ACK_DONE, MBED_CONF_UBXGPSI2C_ACK_TIMEOUT);
 
             if (!(ack & UBX_FLAGS_ERROR)) {
                 ok = ack & UBX_FLAGS_NAK ? false : true;
