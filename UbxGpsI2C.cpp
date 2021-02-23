@@ -94,7 +94,7 @@ bool UbxGpsI2C::send_ack(UbxClassId class_id, char id, const char *payload, uint
 
         if (poll()) {
             tr_debug("Waiting for UBX ACK");
-            uint32_t ack = _flags.wait_all(UBX_FLAGS_ACK_DONE | UBX_FLAGS_SEARCH_DONE, MBED_CONF_UBXGPSI2C_TIMEOUT);
+            uint32_t ack = _flags.wait_all(UBX_FLAGS_ACK_DONE, MBED_CONF_UBXGPSI2C_TIMEOUT);
 
             if (!(ack & UBX_FLAGS_ERROR)) {
                 ok = ack & UBX_FLAGS_NAK ? false : true;
@@ -205,6 +205,7 @@ uint16_t UbxGpsI2C::bytes_available() {
 
             } else {
                 tr_error("Invalid size");
+                return USHRT_MAX;
             }
         }
     }
@@ -234,19 +235,29 @@ bool UbxGpsI2C::get_data() {
                    MBED_CONF_UBXGPSI2C_DATA_SIZE :
                    (_bytes_available - _data_len);
 
-    if (len > 0 && _i2c->transfer(
-                _i2c_addr,
-                nullptr,
-                0,
-                data + _data_len,
-                len,
-                callback(this, &UbxGpsI2C::rx_cb),
-                I2C_EVENT_ALL) == 0) {
-        _data_len += len;
-        return true;
+    if (len > 0) {
+        if (_i2c->transfer(
+                    _i2c_addr,
+                    nullptr,
+                    0,
+                    data + _data_len,
+                    len,
+                    callback(this, &UbxGpsI2C::rx_cb),
+                    I2C_EVENT_ALL) == 0) {
+            _data_len += len;
+            return true;
+        }
+
+        tr_error("I2C RX transfer error");
+
+    } else {
+        tr_error("Zero len");
+        _bytes_available = 0;
+        _data_len = 0;
+        _packet_index = 0;
+        _packet_len = 0;
     }
 
-    tr_error("I2C RX transfer error");
     return false;
 }
 
@@ -395,9 +406,20 @@ END:
         if (_bytes_available > 0) {
             tr_debug("There are still more bytes to read");
             get_data();
+            return;
 
         } else {
-            _flags.set(UBX_FLAGS_SEARCH_DONE);
+            uint16_t new_bytes = bytes_available();
+
+            if (new_bytes == 0 || new_bytes == USHRT_MAX) {
+                _flags.set(UBX_FLAGS_SEARCH_DONE);
+
+            } else {
+                tr_debug("There are new bytes to read");
+                _bytes_available = new_bytes;
+                get_data();
+                return;
+            }
         }
 
     } else {
