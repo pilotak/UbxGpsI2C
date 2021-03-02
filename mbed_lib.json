@@ -11,8 +11,8 @@
       "required": true
     },
     "buffer-size": {
-      "help": "Max size of TX buffer for I2C transfers",
-      "value": 32,
+      "help": "Max size of TX buffer for I2C transfers and CFG packet",
+      "value": 64,
       "required": true
     },
     "repeat-count": {

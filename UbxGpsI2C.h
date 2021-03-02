@@ -1,7 +1,7 @@
 /*
 MIT License
 
-Copyright (c) 2020 Pavel Slama
+Copyright (c) 2021 Pavel Slama
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal
@@ -66,7 +66,10 @@ using namespace std::chrono;
 #define UBX_CFG_RATE 0x08
 #define UBX_CFG_CFG  0x09
 #define UBX_CFG_RXM  0x11
+#define UBX_CFG_SBAS 0x16
 #define UBX_CFG_ODO  0x1E
+#define UBX_CFG_NAV5 0x24
+#define UBX_CFG_PM2  0x3B
 #define UBX_CFG_PMS  0x86
 
 #define UBX_ACK_NAK  0x00
@@ -81,7 +84,30 @@ using namespace std::chrono;
 class UbxGpsI2C {
   public:
     struct cfg_prt_t {
-        uint8_t port;
+        uint8_t portID;
+        uint8_t reserved1;
+        uint16_t txReady;
+        uint32_t mode;
+        uint8_t reserved2[4];
+        uint16_t inProtoMask;
+        uint16_t outProtoMask;
+        uint16_t flags;
+        uint8_t reserved3[2];
+    };
+
+    struct cfg_prt_usb_t {
+        uint8_t portID;
+        uint8_t reserved1;
+        uint16_t txReady;
+        uint8_t reserved2[8];
+        uint16_t inProtoMask;
+        uint16_t outProtoMask;
+        uint8_t reserved3[2];
+        uint8_t reserved4[2];
+    };
+
+    struct cfg_prt_uart_t {
+        uint8_t portID;
         uint8_t reserved1;
         uint16_t txReady;
         uint32_t mode;
@@ -125,6 +151,63 @@ class UbxGpsI2C {
         uint8_t lpMode;
     };
 
+    struct cfg_cfg_t {
+        uint32_t clearMask;
+        uint32_t saveMask;
+        uint32_t loadMask;
+        uint8_t deviceMask;
+    };
+
+    struct cfg_nav5_t {
+        uint16_t mask;
+        uint8_t dynModel;
+        uint8_t fixMode;
+        int32_t fixedAlt;
+        uint32_t fixedAltVar;
+        int8_t minElev;
+        uint8_t drLimit;
+        uint16_t pDop;
+        uint16_t tDop;
+        uint16_t pAcc;
+        uint16_t tAcc;
+        uint8_t staticHoldThresh;
+        uint8_t dgnssTimeout;
+        uint8_t cnoThreshNumSVs;
+        uint8_t cnoThresh;
+        uint8_t reserved1[2];
+        uint16_t staticHoldMaxDist;
+        uint8_t utcStandard;
+        uint8_t reserved2[5];
+    };
+
+    struct cfg_sbas_t {
+        uint8_t mode;
+        uint8_t usage;
+        uint8_t maxSBAS;
+        uint8_t scanmode2;
+        uint32_t scanmode1;
+    };
+
+    struct cfg_pm2_t {
+        uint8_t version;
+        uint8_t reserved1;
+        uint8_t maxStartupStateDur; // s
+        uint8_t reserved2;
+        uint32_t flags;
+        uint32_t updatePeriod; // ms
+        uint32_t searchPeriod; // ms
+        uint32_t gridOffset; // ms
+        uint16_t onTime; // s
+        uint16_t minAcqTime; // s
+        uint8_t reserved3[20];
+    };
+
+    struct cfg_rst_t {
+        uint16_t navBbrMask;
+        uint8_t resetMode;
+        uint8_t reserved1;
+    };
+
     typedef enum {
         UBX_NAV = 0x01,
         UBX_RXM = 0x02,
@@ -160,6 +243,42 @@ class UbxGpsI2C {
         PSV_INVALID = 0xFF,
     } PowerModeValue;
 
+    typedef enum {
+        Clear,
+        Save,
+        Load
+    } PermanentConfig;
+
+    typedef enum {
+        DevBBR      = 0b1, // Battery backed RAM
+        DevFlash    = 0b10, // Flash
+        DevEEPROM   = 0b100, // EEPROM
+        DevSpiFlash = 0b10000, // SPI Flash
+        DevAll      = 0b10111
+    } DeviceMask;
+
+    typedef enum {
+        Portable = 0,
+        Stationary = 2,
+        Pedestrian,
+        Automotive,
+        Sea,
+        Airborne1g,
+        Airborne2g,
+        Airborne4g,
+        WristWornWatch,
+        Bike
+    } DynamicModel;
+
+    typedef enum {
+        HardwareReset = 0, // immediately
+        SoftwareReset,
+        GnssReset,
+        AfterShutdown = 4,
+        ControlledGnssStop = 8,
+        ControlledGnssStart,
+    } ResetMode;
+
     UbxGpsI2C(EventQueue *queue, int8_t address = UBX_DEFAULT_ADDRESS);
     UbxGpsI2C(PinName sda, PinName scl, EventQueue *queue, int8_t address = UBX_DEFAULT_ADDRESS,
               uint32_t frequency = 400000);
@@ -177,9 +296,13 @@ class UbxGpsI2C {
     bool set_output_rate(milliseconds ms, uint16_t cycles = 1);
     bool set_odometer(bool enable, UbxOdoProfile profile, uint8_t velocity_filter = 0);
     bool set_power_mode(PowerModeValue mode, uint16_t period = 0, uint16_t on_time = 0);
-    bool set_low_power(bool low_power);
+    bool set_psm(bool low_power);
     bool get_protocol_version(char *version);
+    bool reset(ResetMode mode, uint16_t bbr_mask);
     bool reset_odometer();
+    bool permanent_configuration(PermanentConfig type, uint32_t mask, uint8_t device_mask);
+    bool set_dynamic_model(DynamicModel model);
+    bool wakeup();
 
     char data[MBED_CONF_UBXGPSI2C_DATA_SIZE] = {0};
 

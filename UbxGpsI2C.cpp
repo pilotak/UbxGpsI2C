@@ -1,7 +1,7 @@
 /*
 MIT License
 
-Copyright (c) 2020 Pavel Slama
+Copyright (c) 2021 Pavel Slama
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal
@@ -412,13 +412,13 @@ END:
             uint16_t new_bytes = bytes_available();
 
             if (new_bytes == 0 || new_bytes == USHRT_MAX) {
+                tr_debug("Search done");
                 _flags.set(UBX_FLAGS_SEARCH_DONE);
 
             } else {
                 tr_debug("There are new bytes to read");
                 _bytes_available = new_bytes;
                 get_data();
-                return;
             }
         }
 
@@ -436,6 +436,8 @@ bool UbxGpsI2C::get_cfg(char id) {
 
         if (poll()) {
             tr_debug("Waiting for CFG packet");
+            _flags.clear(UBX_FLAGS_CFG | UBX_FLAGS_SEARCH_DONE);
+
             uint32_t cfg = _flags.wait_all(UBX_FLAGS_CFG | UBX_FLAGS_SEARCH_DONE, MBED_CONF_UBXGPSI2C_TIMEOUT);
 
             if (cfg & UBX_FLAGS_ERROR) {
@@ -533,6 +535,7 @@ void UbxGpsI2C::cfg_cb() {
 }
 
 void UbxGpsI2C::mon_cb() {
+    // it is crucial to extract it in cb, because there could be another class waiting
     for (auto i = UBX_HEADER_LEN + 40; i < _packet_len; i = i + 30) {
         if (data[i] == 'P' && data[i + 1] == 'R') {
             _buf[0] = (data[i + 8] - '0') * 10 + (data[i + 9] - '0');
@@ -549,6 +552,8 @@ bool UbxGpsI2C::init(I2C *i2c_obj) {
     if (i2c_obj != nullptr) {
         _i2c = i2c_obj;
     }
+
+    MBED_ASSERT(_i2c);
 
     tr_info("Setting up ublox GPS");
 
@@ -569,7 +574,8 @@ bool UbxGpsI2C::init(I2C *i2c_obj) {
 
                 memcpy(&cfg_prt, _buf, sizeof(cfg_prt_t));  // _buf contains only payload
 
-                cfg_prt.outProtoMask &= ~0b110;  // output only UBX
+                cfg_prt.outProtoMask = 1; // output only UBX
+                cfg_prt.flags |= 0b10; // enable extendedTxTimeout
 
                 memcpy(_buf, &cfg_prt, sizeof(cfg_prt_t));
 
@@ -713,7 +719,7 @@ bool UbxGpsI2C::set_power_mode(PowerModeValue mode, uint16_t period, uint16_t on
     return ok;
 }
 
-bool UbxGpsI2C::set_low_power(bool low_power) {
+bool UbxGpsI2C::set_psm(bool low_power) {
     cfg_rxm_t cfg_rxm;
     tr_debug("Setting low power");
 
@@ -750,6 +756,8 @@ bool UbxGpsI2C::get_protocol_version(char *version) {
 
         if (poll()) {
             tr_debug("Waiting for MON VER packet");
+            _flags.clear(UBX_FLAGS_MON | UBX_FLAGS_SEARCH_DONE);
+
             uint32_t cfg = _flags.wait_all(UBX_FLAGS_MON | UBX_FLAGS_SEARCH_DONE, MBED_CONF_UBXGPSI2C_TIMEOUT);
 
             if (!(cfg & UBX_FLAGS_ERROR)) {
@@ -774,6 +782,19 @@ bool UbxGpsI2C::get_protocol_version(char *version) {
     return ok;
 }
 
+bool UbxGpsI2C::reset(ResetMode mode, uint16_t bbr_mask) {
+    cfg_rst_t cfg_rst;
+    tr_info("Resetting");
+
+    cfg_rst.navBbrMask = bbr_mask;
+    cfg_rst.resetMode = mode;
+    cfg_rst.reserved1 = 0;
+
+    memcpy(_buf, &cfg_rst, sizeof(cfg_rst_t));
+
+    return send(UBX_CFG, UBX_CFG_RST, _buf, sizeof(cfg_rst_t));
+}
+
 bool UbxGpsI2C::reset_odometer() {
     tr_debug("Resetting odometer");
 
@@ -784,4 +805,76 @@ bool UbxGpsI2C::reset_odometer() {
     }
 
     return false;
+}
+
+bool UbxGpsI2C::permanent_configuration(PermanentConfig type, uint32_t mask, uint8_t device_mask) {
+    cfg_cfg_t cfg_cfg;
+    tr_debug("Setting permanent configuration");
+
+    cfg_cfg.clearMask = 0;
+    cfg_cfg.saveMask = 0;
+    cfg_cfg.loadMask = 0;
+
+    switch (type) {
+        case Clear:
+            cfg_cfg.clearMask = mask;
+            break;
+
+        case Save:
+            cfg_cfg.saveMask = mask;
+            break;
+
+        case Load:
+            cfg_cfg.loadMask = mask;
+            break;
+    }
+
+    cfg_cfg.deviceMask = device_mask;
+
+    memcpy(_buf, &cfg_cfg, sizeof(cfg_cfg_t));
+
+    if (send_ack(UBX_CFG, UBX_CFG_CFG, _buf, sizeof(cfg_cfg_t))) {
+        tr_info("Permanent configuration OK");
+
+        return true;
+    }
+
+    return false;
+}
+
+bool UbxGpsI2C::set_dynamic_model(DynamicModel model) {
+    cfg_nav5_t cfg_nav5;
+
+    bool ok = get_cfg(UBX_CFG_NAV5);
+
+    if (ok) {
+        tr_debug("CFG-NAV5 received");
+
+        memcpy(&cfg_nav5, _buf, sizeof(cfg_nav5_t)); // _buf contains only payload
+
+        cfg_nav5.dynModel = model;
+
+        memcpy(_buf, &cfg_nav5, sizeof(cfg_nav5_t));
+
+        if (send_ack(UBX_CFG, UBX_CFG_NAV5, _buf, sizeof(cfg_nav5_t))) {
+            tr_info("Dynamic model set to: %u", model);
+
+        } else {
+            ok = false;
+        }
+    }
+
+    return ok;
+}
+
+bool UbxGpsI2C::wakeup() {
+    int32_t ack = -1;
+
+    _buf[0] = 0xFF;
+
+    _i2c->lock();
+    ack = _i2c->write(_i2c_addr, _buf, 1);
+    _i2c->unlock();
+
+    return (ack == 0);
 }
