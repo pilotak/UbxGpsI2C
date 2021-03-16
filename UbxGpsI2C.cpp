@@ -557,45 +557,29 @@ bool UbxGpsI2C::init(I2C *i2c_obj) {
 
     tr_info("Setting up ublox GPS");
 
-    _buf[0] = 0;  // DDC port
-    bool ok = send(UBX_CFG, UBX_CFG_PRT, _buf, 1);
+    bool ok = get_cfg(UBX_CFG_PRT);
 
     if (ok) {
-        // register our packet before polling
-        oob(UBX_CFG, UBX_CFG_PRT, callback(this, &UbxGpsI2C::cfg_cb));
+        tr_debug("CFG-PRT packet received");
 
-        if (poll()) {
-            tr_debug("Waiting for UBX CFG packet");
+        memcpy(&cfg_prt, _buf, sizeof(cfg_prt_t));  // _buf contains only payload
 
-            uint32_t cfg = _flags.wait_all(UBX_FLAGS_CFG | UBX_FLAGS_SEARCH_DONE, MBED_CONF_UBXGPSI2C_TIMEOUT);
+        cfg_prt.portID = 0; // DDC
 
-            if (!(cfg & UBX_FLAGS_ERROR)) {
-                tr_debug("UBX CFG packet received");
+        // output only UBX
+        cfg_prt.outProtoMask &= ~0b100010;
+        cfg_prt.outProtoMask |= 0b1;
 
-                memcpy(&cfg_prt, _buf, sizeof(cfg_prt_t));  // _buf contains only payload
+        cfg_prt.flags |= 0b10; // enable extendedTxTimeout
 
-                cfg_prt.outProtoMask = 1; // output only UBX
-                cfg_prt.flags |= 0b10; // enable extendedTxTimeout
+        memcpy(_buf, &cfg_prt, sizeof(cfg_prt_t));
 
-                memcpy(_buf, &cfg_prt, sizeof(cfg_prt_t));
-
-                if (send_ack(UBX_CFG, UBX_CFG_PRT, _buf, sizeof(cfg_prt_t))) {
-                    tr_info("Setup OK");
-
-                } else {
-                    ok = false;
-                }
-
-            } else {
-                tr_error("UBX CFG timeout");
-                ok = false;
-            }
+        if (send_ack(UBX_CFG, UBX_CFG_PRT, _buf, sizeof(cfg_prt_t))) {
+            tr_info("Setup OK");
 
         } else {
             ok = false;
         }
-
-        remove_oob(UBX_CFG, UBX_CFG_PRT);
     }
 
     return ok;
