@@ -10,7 +10,7 @@ Ublox GPS I2C async library for mbed.
 
 #define GPS_READ_INTERVAL 1000
 
-EventQueue eQueue(1 * EVENTS_EVENT_SIZE);
+EventQueue eQueue(2 * EVENTS_EVENT_SIZE);
 UbxGpsI2C gps(I2C_SDA, I2C_SCL, &eQueue);
 
 struct gps_data_t {
@@ -71,43 +71,63 @@ int main() {
 
     if (eQueueThread.start(callback(&eQueue, &EventQueue::dispatch_forever)) != osOK) {
         printf("eQueueThread error\n");
+        return 0;
     }
 
-    if (gps.init()) {
-        if (gps.set_odometer(true, UbxGpsI2C::ODO_RUNNING)) {
-            if (gps.set_output_rate(GPS_READ_INTERVAL)) {
-                if (gps.auto_send(UbxGpsI2C::UBX_NAV, UBX_NAV_ODO, 1)) {
-                    if (gps.auto_send(UbxGpsI2C::UBX_NAV, UBX_NAV_PVT, 1)) {
-
-                        gps.oob(UbxGpsI2C::UBX_NAV, UBX_NAV_PVT, gpsPVT);
-                        gps.oob(UbxGpsI2C::UBX_NAV, UBX_NAV_ODO, gpsOdo);
-
-                        while (1) {
-                            ThisThread::sleep_for(GPS_READ_INTERVAL);
-
-                            if (!gps.read()) {
-                                printf("Request failed\n");
-                            }
-                        }
-
-                    } else {
-                        printf("Auto PVT FAILED\n");
-                    }
-
-                } else {
-                    printf("Auto odo FAILED\n");
-                }
-
-            } else {
-                printf("PVT rate FAILED\n");
-            }
-
-        } else {
-            printf("Odo FAILED\n");
-        }
-
-    } else {
+    if (!gps.init()) {
         printf("Cound not init\n");
+        return 0;
+    }
+
+    if (!gps.set_output_rate(GPS_READ_INTERVAL)) {
+        printf("PVT rate FAILED\n");
+        return 0;
+    }
+
+    if (!gps.set_odometer(true, UbxGpsI2C::ODO_RUNNING)) {
+        printf("Odo FAILED\n");
+        return 0;
+    }
+
+    if (!gps.auto_send(UbxGpsI2C::UBX_NAV, UBX_NAV_PVT, 1)) {
+        printf("Auto pvt FAILED\n");
+        return 0;
+    }
+
+    UbxGpsI2C::cfg_sbas_t cfg_sbas;
+    char *buffer = new char[sizeof(UbxGpsI2C::cfg_sbas_t)];
+
+    cfg_sbas.mode = 1; // enable
+    cfg_sbas.usage = 0b111; // integrity, diffCorr, range
+    cfg_sbas.maxSBAS = 3;
+    cfg_sbas.scanmode2 = 0;
+    cfg_sbas.scanmode1 = 0b100001011001; // EGNOS: PRN131, PRN126, PRN124, PRN123, PRN120
+
+    memcpy(buffer, &cfg_sbas, sizeof(UbxGpsI2C::cfg_sbas_t));
+
+    if (!gps.send_ack(UbxGpsI2C::UBX_CFG, UBX_CFG_SBAS, buffer, sizeof(UbxGpsI2C::cfg_sbas_t))) {
+        printf("SBAS FAILED\n");
+        return 0;
+    }
+
+    delete[] buffer;
+
+    if (!gps.auto_send(UbxGpsI2C::UBX_NAV, UBX_NAV_ODO, 1)) {
+         printf("Auto odo FAILED\n");
+         return 0;
+    }
+
+    gps.oob(UbxGpsI2C::UBX_NAV, UBX_NAV_PVT, gpsPVT);
+    gps.oob(UbxGpsI2C::UBX_NAV, UBX_NAV_ODO, gpsOdo);
+
+    printf("OK\n");
+
+    while (1) {
+        ThisThread::sleep_for(GPS_READ_INTERVAL);
+
+        if (!gps.read()) {
+            printf("Request failed\n");
+        }
     }
 
     MBED_ASSERT(false);

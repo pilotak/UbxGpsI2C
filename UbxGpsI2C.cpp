@@ -231,8 +231,8 @@ uint16_t UbxGpsI2C::checksum(const char *packet, uint16_t len) {
 }
 
 bool UbxGpsI2C::get_data() {
-    uint16_t len = (_bytes_available - _data_len) > MBED_CONF_UBXGPSI2C_DATA_SIZE ?
-                   MBED_CONF_UBXGPSI2C_DATA_SIZE :
+    uint16_t len = _bytes_available > MBED_CONF_UBXGPSI2C_DATA_SIZE ?
+                   MBED_CONF_UBXGPSI2C_DATA_SIZE - _data_len :
                    (_bytes_available - _data_len);
 
     if (len > 0) {
@@ -444,12 +444,12 @@ bool UbxGpsI2C::get_cfg(char id) {
                 tr_error("CFG timeout");
                 ok = false;
             }
+
+        } else {
+            ok = false;
         }
 
         remove_oob(UBX_CFG, id);
-
-    } else {
-        ok = false;
     }
 
     return ok;
