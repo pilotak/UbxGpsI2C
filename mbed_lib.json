@@ -1,17 +1,17 @@
 {
-  "name": "ubxgpsi2c",
+  "name": "ubxgps",
   "config": {
     "debug": {
       "help": "Enable/disable debug",
       "value": null
     },
-    "data-size": {
+    "rx-buffer-size": {
       "help": "Max size of RX buffer",
       "value": 256,
       "required": true
     },
-    "buffer-size": {
-      "help": "Max size of TX buffer for I2C transfers and CFG packet",
+    "tx-buffer-size": {
+      "help": "Max size of TX buffer for I2C transfers",
       "value": 64,
       "required": true
     },

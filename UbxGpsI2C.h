@@ -1,7 +1,7 @@
 /*
 MIT License
 
-Copyright (c) 2021 Pavel Slama
+Copyright (c) 2024 Pavel Slama
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal
@@ -25,324 +25,53 @@ SOFTWARE.
 #ifndef UBXGPSI2C_H
 #define UBXGPSI2C_H
 
-#if !defined(DEVICE_I2C_ASYNCH)
-    #error "This library only supports I2C in async mode";
-#endif
-
 #include <chrono>
-#include "mbed.h"
+
+#include "UbxParser.h"
+
 using namespace std::chrono;
 
-#include "mbed-trace/mbed_trace.h"
-#ifndef TRACE_GROUP
-    #define TRACE_GROUP  "UBX "
-#endif
+#define UBX_DEFAULT_ADDRESS (0x42 << 1)
 
-#if !defined(MBED_CONF_UBXGPSI2C_DEBUG)
-    #define tr_error(...) {}
-    #define tr_warning(...) {}
-    #define tr_info(...) {}
-    #define tr_debug(...) {}
-#endif
+#define UBX_FLAGS_SEARCH_DONE (1 << 1)
+#define UBX_FLAGS_CFG (1 << 2)
+#define UBX_FLAGS_ACK_DONE (1 << 3)
+#define UBX_FLAGS_NAK (1 << 4)
+#define UBX_FLAGS_MON (1 << 5)
+#define UBX_FLAGS_ERROR (1 << 31)
 
-#define UBX_DEFAULT_ADDRESS (0x42<<1)
-#define UBX_HEADER_LEN     6
-#define UBX_CHECKSUM_LEN   2
+class UbxGpsI2C : public UbxParser {
+   public:
+    UbxGpsI2C(int8_t address = UBX_DEFAULT_ADDRESS);
+    UbxGpsI2C(PinName sda, PinName scl, int8_t address = UBX_DEFAULT_ADDRESS, uint32_t frequency = 400000);
+    ~UbxGpsI2C();
 
-#define UBX_FLAGS_TRANSFER_DONE (1 << 0)
-#define UBX_FLAGS_SEARCH_DONE   (1 << 1)
-#define UBX_FLAGS_CFG           (1 << 2)
-#define UBX_FLAGS_ACK_DONE      (1 << 3)
-#define UBX_FLAGS_NAK           (1 << 4)
-#define UBX_FLAGS_MON           (1 << 5)
-#define UBX_FLAGS_ERROR         (1 << 31)
+    bool init(Callback<void()> cb);
+    bool poll();
+    bool auto_send(UbxClassId class_id, char id, uint8_t rate, Callback<void()> cb);
+    void read();
 
-#define UBX_SYNC_CHAR1 0xB5
-#define UBX_SYNC_CHAR2 0x62
-
-#define UBX_CFG_PRT  0x00
-#define UBX_CFG_MSG  0x01
-#define UBX_CFG_RST  0x04
-#define UBX_CFG_RATE 0x08
-#define UBX_CFG_CFG  0x09
-#define UBX_CFG_RXM  0x11
-#define UBX_CFG_SBAS 0x16
-#define UBX_CFG_ODO  0x1E
-#define UBX_CFG_NAV5 0x24
-#define UBX_CFG_PM2  0x3B
-#define UBX_CFG_PMS  0x86
-
-#define UBX_ACK_NAK  0x00
-#define UBX_ACK_ACK  0x01
-
-#define UBX_NAV_PVT      0x07
-#define UBX_NAV_ODO      0x09
-#define UBX_NAV_RESETODO 0x10
-
-#define UBX_MON_VER 0x04
-
-class UbxGpsI2C {
-  public:
-    struct cfg_prt_t {
-        uint8_t portID;
-        uint8_t reserved1;
-        uint16_t txReady;
-        uint32_t mode;
-        uint8_t reserved2[4];
-        uint16_t inProtoMask;
-        uint16_t outProtoMask;
-        uint16_t flags;
-        uint8_t reserved3[2];
-    };
-
-    struct cfg_prt_usb_t {
-        uint8_t portID;
-        uint8_t reserved1;
-        uint16_t txReady;
-        uint8_t reserved2[8];
-        uint16_t inProtoMask;
-        uint16_t outProtoMask;
-        uint8_t reserved3[2];
-        uint8_t reserved4[2];
-    };
-
-    struct cfg_prt_uart_t {
-        uint8_t portID;
-        uint8_t reserved1;
-        uint16_t txReady;
-        uint32_t mode;
-        uint32_t baudRate;
-        uint16_t inProtoMask;
-        uint16_t outProtoMask;
-        uint16_t flags;
-        uint8_t reserved2[2];
-    };
-
-    struct cfg_rate_t {
-        uint16_t measRate;
-        uint16_t navRate;
-        uint16_t timeRef;
-    };
-
-    struct cfg_pms_t {
-        uint8_t version;
-        uint8_t powerSetupValue;
-        uint16_t period;
-        uint16_t onTime;
-        uint8_t reserved[2];
-    };
-
-    struct odometer_t {
-        uint8_t message_version;
-        uint8_t reserved1[3];
-        uint8_t flags;
-        uint8_t odoCfg;
-        uint8_t reserved2[6];
-        uint8_t cogMaxSpeed;
-        uint8_t cogMaxPosAcc;
-        uint8_t reserved3[2];
-        uint8_t velLpGain;
-        uint8_t cogLpGain;
-        uint8_t reserved4[2];
-    };
-
-    struct cfg_rxm_t {
-        uint8_t reserved;
-        uint8_t lpMode;
-    };
-
-    struct cfg_cfg_t {
-        uint32_t clearMask;
-        uint32_t saveMask;
-        uint32_t loadMask;
-        uint8_t deviceMask;
-    };
-
-    struct cfg_nav5_t {
-        uint16_t mask;
-        uint8_t dynModel;
-        uint8_t fixMode;
-        int32_t fixedAlt;
-        uint32_t fixedAltVar;
-        int8_t minElev;
-        uint8_t drLimit;
-        uint16_t pDop;
-        uint16_t tDop;
-        uint16_t pAcc;
-        uint16_t tAcc;
-        uint8_t staticHoldThresh;
-        uint8_t dgnssTimeout;
-        uint8_t cnoThreshNumSVs;
-        uint8_t cnoThresh;
-        uint8_t reserved1[2];
-        uint16_t staticHoldMaxDist;
-        uint8_t utcStandard;
-        uint8_t reserved2[5];
-    };
-
-    struct cfg_sbas_t {
-        uint8_t mode;
-        uint8_t usage;
-        uint8_t maxSBAS;
-        uint8_t scanmode2;
-        uint32_t scanmode1;
-    };
-
-    struct cfg_pm2_t {
-        uint8_t version;
-        uint8_t reserved1;
-        uint8_t maxStartupStateDur; // s
-        uint8_t reserved2;
-        uint32_t flags;
-        uint32_t updatePeriod; // ms
-        uint32_t searchPeriod; // ms
-        uint32_t gridOffset; // ms
-        uint16_t onTime; // s
-        uint16_t minAcqTime; // s
-        uint8_t reserved3[20];
-    };
-
-    struct cfg_rst_t {
-        uint16_t navBbrMask;
-        uint8_t resetMode;
-        uint8_t reserved1;
-    };
-
-    typedef enum {
-        UBX_NAV = 0x01,
-        UBX_RXM = 0x02,
-        UBX_INF = 0x04,
-        UBX_ACK = 0x05,
-        UBX_CFG = 0x06,
-        UBX_UPD = 0x09,
-        UBX_MON = 0x0A,
-        UBX_AID = 0x0B,
-        UBX_TIM = 0x0D,
-        UBX_ESF = 0x10,
-        UBX_MGA = 0x13,
-        UBX_LOG = 0x21,
-        UBX_SEC = 0x27,
-        UBX_HNR = 0x28
-    } UbxClassId;
-
-    typedef enum {
-        ODO_RUNNING = 0,
-        ODO_CYCLING,
-        ODO_SWIMMING,
-        ODO_CAR,
-        ODO_CUSTOM
-    } UbxOdoProfile;
-
-    typedef enum {
-        PSV_FULL_POWER = 0, // No compromises on power saves
-        PSV_BALANCED, // Power savings without performance degradation
-        PSV_INTERVAL, // ON OFF mode setup
-        PSV_AGGRESSIVE_1HZ, // Strong power saving setup
-        PSV_AGGRESSIVE_2HZ, // Excellent power saving setup
-        PSV_AGGRESSIVE_4HZ, // Good power saving setup
-        PSV_INVALID = 0xFF,
-    } PowerModeValue;
-
-    typedef enum {
-        Clear,
-        Save,
-        Load
-    } PermanentConfig;
-
-    typedef enum {
-        DevBBR      = 0b1, // Battery backed RAM
-        DevFlash    = 0b10, // Flash
-        DevEEPROM   = 0b100, // EEPROM
-        DevSpiFlash = 0b10000, // SPI Flash
-        DevAll      = 0b10111
-    } DeviceMask;
-
-    typedef enum {
-        Portable = 0,
-        Stationary = 2,
-        Pedestrian,
-        Automotive,
-        Sea,
-        Airborne1g,
-        Airborne2g,
-        Airborne4g,
-        WristWornWatch,
-        Bike
-    } DynamicModel;
-
-    typedef enum {
-        HardwareReset = 0, // immediately
-        SoftwareReset,
-        GnssReset,
-        AfterShutdown = 4,
-        ControlledGnssStop = 8,
-        ControlledGnssStart,
-    } ResetMode;
-
-    UbxGpsI2C(EventQueue *queue, int8_t address = UBX_DEFAULT_ADDRESS);
-    UbxGpsI2C(PinName sda, PinName scl, EventQueue *queue, int8_t address = UBX_DEFAULT_ADDRESS,
-              uint32_t frequency = 400000);
-    ~UbxGpsI2C(void);
-
-    bool send(UbxClassId class_id, char id, const char *payload = nullptr, uint16_t payload_len = 0);
-    bool send_ack(UbxClassId class_id, char id, const char *payload = nullptr, uint16_t payload_len = 0);
-    bool read();
-
-    void oob(UbxClassId class_id, char id, Callback<void()> cb);
-    void remove_oob(UbxClassId class_id, char id);
-
-    bool init(I2C *i2c_obj = nullptr);
-    bool auto_send(UbxClassId class_id, char id, uint8_t rate = 1);
-    bool set_output_rate(milliseconds ms, uint16_t cycles = 1);
-    bool set_odometer(bool enable, UbxOdoProfile profile, uint8_t velocity_filter = 0);
-    bool set_power_mode(PowerModeValue mode, uint16_t period = 0, uint16_t on_time = 0);
-    bool set_psm(bool low_power);
-    bool get_protocol_version(char *version);
-    bool reset(ResetMode mode, uint16_t bbr_mask);
-    bool reset_odometer();
-    bool permanent_configuration(PermanentConfig type, uint32_t mask, uint8_t device_mask);
-    bool set_dynamic_model(DynamicModel model);
-    bool wakeup();
-
-    char data[MBED_CONF_UBXGPSI2C_DATA_SIZE] = {0};
-
-  private:
-    struct oob_t {
-        char class_id;
-        char id;
-        Callback<void()> cb;
-        oob_t *next;
-    };
-
-    oob_t      *_oobs;
-    I2C        *_i2c;
-    EventQueue *_queue;
+   protected:
+    I2C *_i2c;
     EventFlags _flags;
 
-    bool     poll(bool await = true);
-    uint16_t packet_builder(UbxClassId class_id, char id, const char *payload, uint16_t payload_len);
-    uint16_t bytes_available();
-    uint16_t checksum(const char *packet, uint16_t len);
-    bool     get_data();
-    uint16_t get_sync_index(const char *buf, uint16_t buf_size, char c, uint16_t offset = 0);
-    void     search_data();
-    bool     get_cfg(char id);
+    int bytes_available();
+    bool read_sync(int length);
+    bool send(UbxClassId class_id, char id, const void *payload, uint16_t payload_len);
+    bool send_ack(UbxClassId class_id, char id, const void *payload, uint16_t payload_len);
 
-    void     tx_cb(int event);
-    void     rx_cb(int event);
-    void     ack_cb();
-    void     cfg_cb();
-    void     mon_cb();
-
-    char         _ack[2] = {0};
-    char         _buf[MBED_CONF_UBXGPSI2C_BUFFER_SIZE] = {0};
-    uint16_t     _bytes_available = 0;
-    uint16_t     _data_len = 0;
+   private:
     const int8_t _i2c_addr;
-    uint32_t     _i2c_obj[sizeof(I2C) / sizeof(uint32_t)] = {0};
-    uint16_t     _packet_checksum_index = 0;
-    uint16_t     _packet_index = 0;
-    uint16_t     _packet_len = 0;
+    uint32_t _i2c_obj[sizeof(I2C) / sizeof(uint32_t)] = {0};
+    char _tx_buffer[MBED_CONF_UBXGPS_TX_BUFFER_SIZE] = {0};
+    char _rx_buffer[MBED_CONF_UBXGPS_RX_BUFFER_SIZE] = {0};
+    char _ack[2] = {0};
+    uint16_t _rx_buffer_len = 0;
+
+    Callback<void()> _cb;  // callback for required poll
+
+    void rx_cb(int event);
+    void ack_cb();
 };
 
 #endif  // UBXGPSI2C_H
