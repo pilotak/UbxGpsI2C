@@ -7,7 +7,7 @@
     },
     "rx-buffer-size": {
       "help": "Max size of RX buffer",
-      "value": 256,
+      "value": 128,
       "required": true
     },
     "tx-buffer-size": {
@@ -23,16 +23,6 @@
     "repeat-delay": {
       "help": "How long to wait before trying to request available data (ms)",
       "value": 30,
-      "required": true
-    },
-    "timeout": {
-      "help": "Timeout for async calls (ms)",
-      "value": 200,
-      "required": true
-    },
-    "ack-timeout": {
-      "help": "Timeout for async calls (ms)",
-      "value": 800,
       "required": true
     }
   }

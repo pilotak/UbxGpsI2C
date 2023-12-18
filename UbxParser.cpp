@@ -141,7 +141,7 @@ void UbxParser::parse(const char *buffer, uint16_t length) {
                     state = StateMachine::LENGTH_READ_1;
                     add_checksum(buffer[i]);
                 } else {
-                    ubx_debug("Skipping class: %02X, id: %02X", msg.classId, msg.id);
+                    ubx_warning("Skipping class: %02X, id: %02X", msg.classId, msg.id);
                     state = StateMachine::SYNC_SEARCH_1;
                     memset(_checksum_calc, 0, sizeof(_checksum_calc));  // reset checksum
                 }
