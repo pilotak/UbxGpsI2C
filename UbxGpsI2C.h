@@ -74,6 +74,7 @@ class UbxGpsI2C : public UbxParser {
     uint16_t _rx_buffer_len = 0;
     const int8_t _i2c_addr;
     bool _done_cb_called = false;
+    bool _new_cfg = false;
     char _tx_buffer[MBED_CONF_UBXGPS_TX_BUFFER_SIZE] = {0};  // This buffer is also used for reading (internal purpose)
     char _rx_buffer[MBED_CONF_UBXGPS_RX_BUFFER_SIZE] = {0};
 

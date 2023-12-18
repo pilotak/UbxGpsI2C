@@ -49,14 +49,32 @@ bool UbxGpsI2C::init(Callback<void()> cb, I2C *i2c_obj) {
 
     _cb = cb;
 
-    cfg_prt_t cfg_prt = {0};
+    // get protocol version
+    char ver[6] = {0};
 
-    cfg_prt.mode = UBX_DEFAULT_ADDRESS;
-    cfg_prt.inProtoMask = 1;   // input only UBX
-    cfg_prt.outProtoMask = 1;  // output only UBX
-    cfg_prt.flags = 0b10;      // enable extendedTxTimeout
+    if (!protocol_version(ver)) {
+        return false;
+    }
 
-    return send_ack(UBX_CFG, UBX_CFG_PRT, &cfg_prt, sizeof(cfg_prt_t));
+    float version = strtof(ver, nullptr);
+
+    if (version > 23.01) {
+        _new_cfg = true;
+    }
+
+    if (!_new_cfg) {
+        cfg_prt_t cfg_prt = {0};
+
+        cfg_prt.mode = UBX_DEFAULT_ADDRESS;
+        cfg_prt.inProtoMask = 1;   // input only UBX
+        cfg_prt.outProtoMask = 1;  // output only UBX
+        cfg_prt.flags = 0b10;      // enable extendedTxTimeout
+
+        return send_ack(UBX_CFG, UBX_CFG_PRT, &cfg_prt, sizeof(cfg_prt_t));
+    }
+
+    // TODO new cfg
+    return false;
 }
 
 bool UbxGpsI2C::poll() {
@@ -68,6 +86,7 @@ bool UbxGpsI2C::poll() {
     }
 
     _rx_buffer_len = available;
+    _mutex.unlock();  // in case we succeeded
 
     if (available > 0) {
         return _i2c->transfer(_i2c_addr, nullptr, 0, _rx_buffer, available, callback(this, &UbxGpsI2C::rx_cb),
@@ -79,11 +98,17 @@ bool UbxGpsI2C::poll() {
 
 bool UbxGpsI2C::auto_send(UbxClassId class_id, char id, uint8_t rate, Callback<void()> cb) {
     ubx_info("Autosend request");
-    cfg_msg_t cfg_msg = {.classId = class_id, .id = id, .rate = rate};
 
-    this->oob(class_id, id, cb);
+    if (!_new_cfg) {
+        cfg_msg_t cfg_msg = {.classId = class_id, .id = id, .rate = rate};
 
-    return send_ack(UBX_CFG, UBX_CFG_MSG, &cfg_msg, sizeof(cfg_msg_t));
+        this->oob(class_id, id, cb);
+
+        return send_ack(UBX_CFG, UBX_CFG_MSG, &cfg_msg, sizeof(cfg_msg_t));
+    }
+
+    // TODO new cfg
+    return false;
 }
 
 void UbxGpsI2C::process() {
@@ -100,95 +125,122 @@ bool UbxGpsI2C::set_output_rate(milliseconds ms, uint16_t cycles) {
         return false;
     }
 
-    cfg_rate_t cfg_rate = {
-        .measRate = (uint16_t)duration_cast<milliseconds>(ms).count(),
-        .navRate = cycles,
-        .timeRef = 0  // UTC
-    };
+    if (!_new_cfg) {
+        cfg_rate_t cfg_rate = {
+            .measRate = (uint16_t)duration_cast<milliseconds>(ms).count(),
+            .navRate = cycles,
+            .timeRef = 0  // UTC
+        };
 
-    return send_ack(UBX_CFG, UBX_CFG_RATE, &cfg_rate, sizeof(cfg_rate));
+        return send_ack(UBX_CFG, UBX_CFG_RATE, &cfg_rate, sizeof(cfg_rate));
+    }
+
+    // TODO new cfg
+    return false;
 }
 
 bool UbxGpsI2C::set_odometer(bool enable, OdoCfgProfile profile, uint8_t velocity_filter) {
     ubx_info("Setting odometer");
 
-    if (!send(UBX_CFG, UBX_CFG_ODO)) {
-        return false;
+    if (!_new_cfg) {
+        if (!send(UBX_CFG, UBX_CFG_ODO)) {
+            return false;
+        }
+
+        if (!get(UBX_CFG, UBX_CFG_ODO)) {
+            return false;
+        }
+
+        cfg_odo_t cfg_odo;
+        memcpy(&cfg_odo, _tx_buffer + 2, sizeof(cfg_odo_t));
+
+        cfg_odo.odoCfg &= ~0b111;
+        cfg_odo.odoCfg |= (uint8_t)profile;
+
+        if (velocity_filter > 0) {
+            cfg_odo.flags |= 0b100;
+
+        } else {
+            cfg_odo.flags &= ~0b100;
+        }
+
+        cfg_odo.velLpGain = velocity_filter;
+
+        if (enable) {
+            cfg_odo.flags |= 0b1;
+
+        } else {
+            cfg_odo.flags &= ~0b1;
+        }
+
+        return send_ack(UBX_CFG, UBX_CFG_ODO, &cfg_odo, sizeof(cfg_odo_t));
     }
 
-    if (!get(UBX_CFG, UBX_CFG_ODO)) {
-        return false;
-    }
-
-    cfg_odo_t cfg_odo;
-    memcpy(&cfg_odo, _tx_buffer + 2, sizeof(cfg_odo_t));
-
-    cfg_odo.odoCfg &= ~0b111;
-    cfg_odo.odoCfg |= (uint8_t)profile;
-
-    if (velocity_filter > 0) {
-        cfg_odo.flags |= 0b100;
-
-    } else {
-        cfg_odo.flags &= ~0b100;
-    }
-
-    cfg_odo.velLpGain = velocity_filter;
-
-    if (enable) {
-        cfg_odo.flags |= 0b1;
-
-    } else {
-        cfg_odo.flags &= ~0b1;
-    }
-
-    return send_ack(UBX_CFG, UBX_CFG_ODO, &cfg_odo, sizeof(cfg_odo_t));
+    // TODO new cfg
+    return false;
 }
 
 bool UbxGpsI2C::set_power_mode(PowerSetupValue mode, uint16_t period, uint16_t on_time) {
     ubx_info("Setting power mode");
 
-    if (!send(UBX_CFG, UBX_CFG_PMS)) {
-        return false;
+    if (!_new_cfg) {
+        if (!send(UBX_CFG, UBX_CFG_PMS)) {
+            return false;
+        }
+
+        if (!get(UBX_CFG, UBX_CFG_PMS)) {
+            return false;
+        }
+
+        cfg_pms_t cfg_pms;
+        memcpy(&cfg_pms, _tx_buffer + 2, sizeof(cfg_pms_t));
+
+        cfg_pms.powerSetupValue = (uint8_t)mode;
+        cfg_pms.period = (mode == PSV_INTERVAL) ? period : 0;
+        cfg_pms.onTime = (mode == PSV_INTERVAL) ? on_time : 0;
+
+        return send_ack(UBX_CFG, UBX_CFG_PMS, &cfg_pms, sizeof(cfg_pms_t));
     }
 
-    if (!get(UBX_CFG, UBX_CFG_PMS)) {
-        return false;
-    }
-
-    cfg_pms_t cfg_pms;
-    memcpy(&cfg_pms, _tx_buffer + 2, sizeof(cfg_pms_t));
-
-    cfg_pms.powerSetupValue = (uint8_t)mode;
-    cfg_pms.period = (mode == PSV_INTERVAL) ? period : 0;
-    cfg_pms.onTime = (mode == PSV_INTERVAL) ? on_time : 0;
-
-    return send_ack(UBX_CFG, UBX_CFG_PMS, &cfg_pms, sizeof(cfg_pms_t));
+    // TODO new cfg
+    return false;
 }
 
 bool UbxGpsI2C::set_psm(bool low_power) {
     ubx_info("Setting low power");
-    if (!send(UBX_CFG, UBX_CFG_RXM)) {
-        return false;
+
+    if (!_new_cfg) {
+        if (!send(UBX_CFG, UBX_CFG_RXM)) {
+            return false;
+        }
+
+        if (!get(UBX_CFG, UBX_CFG_RXM)) {
+            return false;
+        }
+
+        cfg_rxm_t cfg_rxm;
+        memcpy(&cfg_rxm, _tx_buffer + 2, sizeof(cfg_rxm_t));
+
+        cfg_rxm.lpMode = low_power;
+
+        return send_ack(UBX_CFG, UBX_CFG_RXM, &cfg_rxm, sizeof(cfg_rxm_t));
     }
 
-    if (!get(UBX_CFG, UBX_CFG_RXM)) {
-        return false;
-    }
-
-    cfg_rxm_t cfg_rxm;
-    memcpy(&cfg_rxm, _tx_buffer + 2, sizeof(cfg_rxm_t));
-
-    cfg_rxm.lpMode = low_power;
-
-    return send_ack(UBX_CFG, UBX_CFG_RXM, &cfg_rxm, sizeof(cfg_rxm_t));
+    // TODO new cfg
+    return false;
 }
 
 bool UbxGpsI2C::reset(ResetMode mode, uint16_t bbr_mask) {
     ubx_info("Resetting");
-    cfg_rst_t cfg_rst = {.navBbrMask = bbr_mask, .resetMode = mode, .reserved1 = 0};
 
-    return send(UBX_CFG, UBX_CFG_RST, &cfg_rst, sizeof(cfg_rst_t));
+    if (!_new_cfg) {
+        cfg_rst_t cfg_rst = {.navBbrMask = bbr_mask, .resetMode = mode, .reserved1 = 0};
+
+        return send(UBX_CFG, UBX_CFG_RST, &cfg_rst, sizeof(cfg_rst_t));
+    }
+
+    // TODO new cfg
+    return false;
 }
 
 bool UbxGpsI2C::reset_odometer() {
@@ -199,41 +251,53 @@ bool UbxGpsI2C::reset_odometer() {
 
 bool UbxGpsI2C::permanent_configuration(PermanentConfig type, uint32_t mask, uint8_t device_mask) {
     ubx_info("Setting permanent configuration");
-    cfg_cfg_t cfg_cfg = {.clearMask = 0, .saveMask = 0, .loadMask = 0, .deviceMask = device_mask};
 
-    switch (type) {
-        case Clear:
-            cfg_cfg.clearMask = mask;
-            break;
+    if (!_new_cfg) {
+        cfg_cfg_t cfg_cfg = {.clearMask = 0, .saveMask = 0, .loadMask = 0, .deviceMask = device_mask};
 
-        case Save:
-            cfg_cfg.saveMask = mask;
-            break;
+        switch (type) {
+            case Clear:
+                cfg_cfg.clearMask = mask;
+                break;
 
-        case Load:
-            cfg_cfg.loadMask = mask;
-            break;
+            case Save:
+                cfg_cfg.saveMask = mask;
+                break;
+
+            case Load:
+                cfg_cfg.loadMask = mask;
+                break;
+        }
+
+        return send_ack(UBX_CFG, UBX_CFG_CFG, &cfg_cfg, sizeof(cfg_cfg_t));
     }
 
-    return send_ack(UBX_CFG, UBX_CFG_CFG, &cfg_cfg, sizeof(cfg_cfg_t));
+    // TODO new cfg
+    return false;
 }
 
 bool UbxGpsI2C::set_dynamic_model(DynamicModel model) {
     ubx_info("Setting low power");
-    if (!send(UBX_CFG, UBX_CFG_NAV5)) {
-        return false;
+
+    if (!_new_cfg) {
+        if (!send(UBX_CFG, UBX_CFG_NAV5)) {
+            return false;
+        }
+
+        if (!get(UBX_CFG, UBX_CFG_NAV5)) {
+            return false;
+        }
+
+        cfg_nav5_t cfg_nav5;
+        memcpy(&cfg_nav5, _tx_buffer + 2, sizeof(cfg_nav5_t));
+
+        cfg_nav5.dynModel = model;
+
+        return send_ack(UBX_CFG, UBX_CFG_NAV5, &cfg_nav5, sizeof(cfg_nav5_t));
     }
 
-    if (!get(UBX_CFG, UBX_CFG_NAV5)) {
-        return false;
-    }
-
-    cfg_nav5_t cfg_nav5;
-    memcpy(&cfg_nav5, _tx_buffer + 2, sizeof(cfg_nav5_t));
-
-    cfg_nav5.dynModel = model;
-
-    return send_ack(UBX_CFG, UBX_CFG_NAV5, &cfg_nav5, sizeof(cfg_nav5_t));
+    // TODO new cfg
+    return false;
 }
 
 bool UbxGpsI2C::wakeup() {
@@ -255,7 +319,7 @@ bool UbxGpsI2C::protocol_version(char *version) {
         return false;
     }
 
-    ubx_debug("Protocol version: %.5s", _tx_buffer + 2);
+    ubx_info("Protocol version: %.5s", _tx_buffer + 2);
 
     if (version != nullptr) {
         memcpy(version, _tx_buffer + 2, 5);
