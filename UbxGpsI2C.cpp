@@ -387,7 +387,7 @@ bool UbxGpsI2C::send_ack(UbxClassId class_id, char id, const void *payload, uint
 
     bool ok =
         _tx_buffer[0] == UBX_ACK && _tx_buffer[1] == UBX_ACK_ACK && _tx_buffer[2] == class_id && _tx_buffer[3] == id;
-    tr_debug("ACK OK: %u", ok);
+    ubx_debug("ACK OK: %u", ok);
 
     return ok;
 }
