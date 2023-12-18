@@ -58,6 +58,7 @@ class UbxGpsI2C : public UbxParser {
     bool permanent_configuration(PermanentConfig type, uint32_t mask, uint8_t device_mask);
     bool set_dynamic_model(DynamicModel model);
     bool wakeup();
+    bool protocol_version(char *version);
 
    protected:
     I2C *_i2c;

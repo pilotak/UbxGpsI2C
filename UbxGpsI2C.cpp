@@ -244,6 +244,26 @@ bool UbxGpsI2C::wakeup() {
     return (ack == 0);
 }
 
+bool UbxGpsI2C::protocol_version(char *version) {
+    ubx_info("Getting procotol version");
+
+    if (!send(UBX_MON, UBX_MON_VER)) {
+        return false;
+    }
+
+    if (!get(UBX_MON, UBX_MON_VER)) {
+        return false;
+    }
+
+    ubx_debug("Protocol version: %.5s", _tx_buffer + 2);
+
+    if (version != nullptr) {
+        memcpy(version, _tx_buffer + 2, 5);
+    }
+
+    return true;
+}
+
 int UbxGpsI2C::bytes_available() {
     _tx_buffer[0] = 0xFD;
 
@@ -316,8 +336,21 @@ void UbxGpsI2C::done_cb() {
     _tx_buffer[0] = msg.classId;
     _tx_buffer[1] = msg.id;
 
-    memcpy(_tx_buffer + 2, msg.data.get(), min(msg.length, (uint16_t)sizeof(_tx_buffer)));
-    _done_cb_called = true;
+    if (msg.classId == UBX_MON && msg.id == UBX_MON_VER) {
+        const char protver[] = "PROTVER=";
+        const uint16_t protver_len = strlen(protver);
+
+        for (uint16_t i = 0; i < msg.length - protver_len + 1; ++i) {
+            if (memcmp(msg.data.get() + i, protver, protver_len) == 0) {
+                memcpy(_tx_buffer + 2, msg.data.get() + i + protver_len, 5);
+                _done_cb_called = true;
+            }
+        }
+
+    } else {
+        memcpy(_tx_buffer + 2, msg.data.get(), min(msg.length, (uint16_t)sizeof(_tx_buffer)));
+        _done_cb_called = true;
+    }
 }
 
 bool UbxGpsI2C::get(UbxClassId class_id, char id) {

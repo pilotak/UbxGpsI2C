@@ -115,7 +115,7 @@ int main() {
         return 0;
     }
 
-    ticker.attach(&pollGps, 3s);
+    ticker.attach(&pollGps, GPS_READ_INTERVAL);
 
     printf("GPS OK\n");
 

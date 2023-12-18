@@ -65,6 +65,9 @@ SOFTWARE.
 #define UBX_CFG_NAV5 0x24
 #define UBX_CFG_PM2 0x3B
 #define UBX_CFG_PMS 0x86
+#define UBX_CFG_VALSET 0x8A
+#define UBX_CFG_VALGET 0x8B
+#define UBX_CFG_VALDEL 0x8C
 
 #define UBX_ACK_NAK 0x00
 #define UBX_ACK_ACK 0x01
@@ -230,7 +233,7 @@ class UbxParser {
         UBX_MGA = 0x13,
         UBX_LOG = 0x21,
         UBX_SEC = 0x27,
-        UBX_HNR = 0x28
+        UBX_HNR = 0x28,
     } UbxClassId;
 
     typedef enum { ODO_RUNNING = 0, ODO_CYCLING, ODO_SWIMMING, ODO_CAR, ODO_CUSTOM } OdoCfgProfile;
@@ -265,7 +268,9 @@ class UbxParser {
         Airborne2g,
         Airborne4g,
         WristWornWatch,
-        Bike
+        Bike,
+        Mower,
+        Escooter
     } DynamicModel;
 
     typedef enum {
