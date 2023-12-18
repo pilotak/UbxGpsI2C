@@ -38,8 +38,12 @@ UbxGpsI2C::UbxGpsI2C(PinName sda, PinName scl, int8_t address, uint32_t frequenc
 
 UbxGpsI2C::~UbxGpsI2C() {}
 
-bool UbxGpsI2C::init(Callback<void()> cb) {
+bool UbxGpsI2C::init(Callback<void()> cb, I2C *i2c_obj) {
     ubx_info("Setting up ublox GPS");
+
+    if (i2c_obj != nullptr) {
+        _i2c = i2c_obj;
+    }
 
     MBED_ASSERT(_i2c);
 

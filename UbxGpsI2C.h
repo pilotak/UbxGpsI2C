@@ -42,11 +42,11 @@ class UbxGpsI2C : public UbxParser {
     UbxGpsI2C(PinName sda, PinName scl, int8_t address = UBX_DEFAULT_ADDRESS, uint32_t frequency = 400000);
     ~UbxGpsI2C();
 
-    bool init(Callback<void()> cb);
+    bool init(Callback<void()> cb, I2C *i2c_obj = nullptr);
     bool poll();
     void process();
     bool send(UbxClassId class_id, char id, const void *payload = nullptr, uint16_t payload_len = 0);
-    bool send_ack(UbxClassId class_id, char id, const void *payload= nullptr, uint16_t payload_len = 0);
+    bool send_ack(UbxClassId class_id, char id, const void *payload = nullptr, uint16_t payload_len = 0);
 
     bool auto_send(UbxClassId class_id, char id, uint8_t rate, Callback<void()> cb);
     bool set_output_rate(milliseconds ms, uint16_t cycles = 1);
@@ -75,7 +75,7 @@ class UbxGpsI2C : public UbxParser {
     bool _done_cb_called = false;
     char _tx_buffer[MBED_CONF_UBXGPS_TX_BUFFER_SIZE] = {0};  // This buffer is also used for reading (internal purpose)
     char _rx_buffer[MBED_CONF_UBXGPS_RX_BUFFER_SIZE] = {0};
-    
+
     void rx_cb(int event);
     void done_cb();
     bool get(UbxClassId class_id, char id);
