@@ -102,8 +102,6 @@ bool UbxGpsI2C::auto_send(UbxClassId class_id, char id, uint8_t rate, Callback<v
     if (!_new_cfg) {
         cfg_msg_t cfg_msg = {.classId = class_id, .id = id, .rate = rate};
 
-        this->oob(class_id, id, cb);
-
         return send_ack(UBX_CFG, UBX_CFG_MSG, &cfg_msg, sizeof(cfg_msg_t));
     }
 
@@ -386,6 +384,8 @@ bool UbxGpsI2C::send_ack(UbxClassId class_id, char id, const void *payload, uint
     if (!get(UBX_ACK, UBX_ACK_ACK)) {
         return false;
     }
+
+    tr_debug("ACK OK: %u", _tx_buffer[1] == UBX_ACK_ACK);
 
     return _tx_buffer[0] == UBX_ACK && _tx_buffer[1] == UBX_ACK_ACK;
 }
