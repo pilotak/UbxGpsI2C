@@ -33,11 +33,7 @@ using namespace std::chrono;
 
 #define UBX_DEFAULT_ADDRESS (0x42 << 1)
 
-#define UBX_FLAGS_SEARCH_DONE (1 << 1)
-#define UBX_FLAGS_CFG (1 << 2)
-#define UBX_FLAGS_ACK_DONE (1 << 3)
-#define UBX_FLAGS_NAK (1 << 4)
-#define UBX_FLAGS_MON (1 << 5)
+#define UBX_FLAGS_DATA_DONE (1 << 1)
 #define UBX_FLAGS_ERROR (1 << 31)
 
 class UbxGpsI2C : public UbxParser {
@@ -48,30 +44,41 @@ class UbxGpsI2C : public UbxParser {
 
     bool init(Callback<void()> cb);
     bool poll();
+    void process();
+    bool send(UbxClassId class_id, char id, const void *payload = nullptr, uint16_t payload_len = 0);
+    bool send_ack(UbxClassId class_id, char id, const void *payload= nullptr, uint16_t payload_len = 0);
+
     bool auto_send(UbxClassId class_id, char id, uint8_t rate, Callback<void()> cb);
-    void read();
+    bool set_output_rate(milliseconds ms, uint16_t cycles = 1);
+    bool set_odometer(bool enable, OdoCfgProfile profile, uint8_t velocity_filter = 0);
+    bool set_power_mode(PowerSetupValue mode, uint16_t period = 0, uint16_t on_time = 0);
+    bool set_psm(bool low_power);
+    bool reset(ResetMode mode, uint16_t bbr_mask);
+    bool reset_odometer();
+    bool permanent_configuration(PermanentConfig type, uint32_t mask, uint8_t device_mask);
+    bool set_dynamic_model(DynamicModel model);
+    bool wakeup();
 
    protected:
     I2C *_i2c;
-    EventFlags _flags;
 
     int bytes_available();
     bool read_sync(int length);
-    bool send(UbxClassId class_id, char id, const void *payload, uint16_t payload_len);
-    bool send_ack(UbxClassId class_id, char id, const void *payload, uint16_t payload_len);
 
    private:
-    const int8_t _i2c_addr;
-    uint32_t _i2c_obj[sizeof(I2C) / sizeof(uint32_t)] = {0};
-    char _tx_buffer[MBED_CONF_UBXGPS_TX_BUFFER_SIZE] = {0};
-    char _rx_buffer[MBED_CONF_UBXGPS_RX_BUFFER_SIZE] = {0};
-    char _ack[2] = {0};
-    uint16_t _rx_buffer_len = 0;
-
     Callback<void()> _cb;  // callback for required poll
+    Mutex _mutex;
 
+    uint32_t _i2c_obj[sizeof(I2C) / sizeof(uint32_t)] = {0};
+    uint16_t _rx_buffer_len = 0;
+    const int8_t _i2c_addr;
+    bool _done_cb_called = false;
+    char _tx_buffer[MBED_CONF_UBXGPS_TX_BUFFER_SIZE] = {0};  // This buffer is also used for reading (internal purpose)
+    char _rx_buffer[MBED_CONF_UBXGPS_RX_BUFFER_SIZE] = {0};
+    
     void rx_cb(int event);
-    void ack_cb();
+    void done_cb();
+    bool get(UbxClassId class_id, char id);
 };
 
 #endif  // UBXGPSI2C_H

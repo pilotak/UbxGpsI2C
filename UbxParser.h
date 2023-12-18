@@ -28,19 +28,18 @@ SOFTWARE.
 #include "mbed-trace/mbed_trace.h"
 #include "mbed.h"
 
-
 #ifndef TRACE_GROUP
     #define TRACE_GROUP "UBX "
 #endif
 
 #if !defined(MBED_CONF_UBXGPS_DEBUG)
-    #define tr_error(...) \
+    #define ubx_error(...) \
         {}
-    #define tr_warning(...) \
+    #define ubx_warning(...) \
         {}
-    #define tr_info(...) \
+    #define ubx_info(...) \
         {}
-    #define tr_debug(...) \
+    #define ubx_debug(...) \
         {}
 #else
     #define ubx_error tr_error
@@ -133,8 +132,8 @@ class UbxParser {
         uint8_t reserved[2];
     };
 
-    struct odometer_t {
-        uint8_t message_version;
+    struct cfg_odo_t {
+        uint8_t messageVersion;
         uint8_t reserved1[3];
         uint8_t flags;
         uint8_t odoCfg;
@@ -210,7 +209,7 @@ class UbxParser {
     };
 
     struct message_t {
-        uint8_t class_id;
+        uint8_t classId;
         uint8_t id;
         uint16_t length;
         std::unique_ptr<uint8_t[]> data;
@@ -234,7 +233,7 @@ class UbxParser {
         UBX_HNR = 0x28
     } UbxClassId;
 
-    typedef enum { ODO_RUNNING = 0, ODO_CYCLING, ODO_SWIMMING, ODO_CAR, ODO_CUSTOM } UbxOdoProfile;
+    typedef enum { ODO_RUNNING = 0, ODO_CYCLING, ODO_SWIMMING, ODO_CAR, ODO_CUSTOM } OdoCfgProfile;
 
     typedef enum {
         PSV_FULL_POWER = 0,  // No compromises on power saves
@@ -244,7 +243,7 @@ class UbxParser {
         PSV_AGGRESSIVE_2HZ,  // Excellent power saving setup
         PSV_AGGRESSIVE_4HZ,  // Good power saving setup
         PSV_INVALID = 0xFF,
-    } PowerModeValue;
+    } PowerSetupValue;
 
     typedef enum { Clear, Save, Load } PermanentConfig;
 
@@ -311,10 +310,9 @@ class UbxParser {
 
     oob_t *_oobs = nullptr;
     EventFlags _flags;
+    uint8_t _checksum_calc[2] = {0};
 
     void add_checksum(char b);
-
-    uint8_t _checksum_calc[2] = {0};
 };
 
 #endif  // UBXPARSER_H

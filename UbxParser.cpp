@@ -100,7 +100,7 @@ void UbxParser::parse(const char *buffer, uint16_t length) {
     static StateMachine state = StateMachine::SYNC_SEARCH_1;
     static uint16_t data_index = 0;
 
-    ubx_debug("Read: %s", tr_array(reinterpret_cast<const uint8_t *>(buffer), length));
+    // ubx_debug("Read: %s", tr_array(reinterpret_cast<const uint8_t *>(buffer), length));
 
     for (uint16_t i = 0; i < length; i++) {
         switch (state) {
@@ -119,7 +119,7 @@ void UbxParser::parse(const char *buffer, uint16_t length) {
                 break;
 
             case StateMachine::CLASS_READ:
-                msg.class_id = buffer[i];
+                msg.classId = buffer[i];
                 state = StateMachine::ID_READ;
                 add_checksum(buffer[i]);
 
@@ -130,7 +130,7 @@ void UbxParser::parse(const char *buffer, uint16_t length) {
                 msg.id = buffer[i];
 
                 for (struct oob_t *oob = _oobs; oob; oob = oob->next) {
-                    if (oob->class_id == msg.class_id && (oob->class_id == UBX_ACK || oob->id == msg.id)) {
+                    if (oob->class_id == msg.classId && (oob->class_id == UBX_ACK || oob->id == msg.id)) {
                         ubx_debug("This is a packet we are looking for");
                         process = true;
                         break;
@@ -141,7 +141,7 @@ void UbxParser::parse(const char *buffer, uint16_t length) {
                     state = StateMachine::LENGTH_READ_1;
                     add_checksum(buffer[i]);
                 } else {
-                    ubx_debug("Skipping class: %02X, id: %02X", msg.class_id, msg.id);
+                    ubx_debug("Skipping class: %02X, id: %02X", msg.classId, msg.id);
                     state = StateMachine::SYNC_SEARCH_1;
                     memset(_checksum_calc, 0, sizeof(_checksum_calc));  // reset checksum
                 }
@@ -186,8 +186,7 @@ void UbxParser::parse(const char *buffer, uint16_t length) {
                     ubx_debug("Checksum OK");
 
                     for (struct oob_t *oob = _oobs; oob; oob = oob->next) {
-                        if (oob->class_id == msg.class_id && (oob->class_id == UBX_ACK || oob->id == msg.id)) {
-                            ubx_info("New data");
+                        if (oob->class_id == msg.classId && (oob->class_id == UBX_ACK || oob->id == msg.id)) {
                             oob->cb.call();
                             break;
                         }
