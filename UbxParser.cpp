@@ -131,7 +131,7 @@ void UbxParser::parse(const char *buffer, uint16_t length) {
 
                 for (struct oob_t *oob = _oobs; oob; oob = oob->next) {
                     if (oob->class_id == msg.classId && (oob->class_id == UBX_ACK || oob->id == msg.id)) {
-                        ubx_debug("This is a packet we are looking for");
+                        ubx_debug("This is a packet we are looking for, class: %02X, id: %02X", msg.classId, msg.id);
                         process = true;
                         break;
                     }

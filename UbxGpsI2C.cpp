@@ -97,7 +97,9 @@ bool UbxGpsI2C::poll() {
 };
 
 bool UbxGpsI2C::auto_send(UbxClassId class_id, char id, uint8_t rate, Callback<void()> cb) {
-    ubx_info("Autosend request");
+    ubx_info("Autosend request, class: %02X id: %02X", class_id, id);
+
+    this->oob(class_id, id, cb);
 
     if (!_new_cfg) {
         cfg_msg_t cfg_msg = {.classId = class_id, .id = id, .rate = rate};
