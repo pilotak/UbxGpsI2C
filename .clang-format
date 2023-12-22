@@ -1,0 +1,11 @@
+Language: Cpp
+BasedOnStyle: Google
+SeparateDefinitionBlocks: Always
+EmptyLineBeforeAccessModifier: LogicalBlock
+ColumnLimit: 120
+ReflowComments: true
+InsertBraces: true
+IndentPPDirectives: BeforeHash
+AllowShortFunctionsOnASingleLine: Empty
+AllowShortBlocksOnASingleLine: Empty
+IndentWidth: 4
